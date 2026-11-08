@@ -4,7 +4,7 @@
 
 给 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)(`dsh`)写的研究插件共享核心:研究身份与绑定、统一数据访问层、流程与 observation、结果渲染与图表。它是 Host 侧的库,没有独立界面。
 
-版本 1.1.0 · 需要 DSH ≥ 0.2.2-rc.1 · MIT 许可
+版本 1.2.0 · 需要 DSH ≥ 0.2.2-rc.1 · MIT 许可
 
 本仓库同时是这套研究插件的总览。
 
@@ -12,7 +12,7 @@
 
 | 包 | 版本 | 一句话 | 仓库 |
 |---|---|---|---|
-| `@local/research-core` | 1.1.0 | 共享核心:身份、数据、流程、结果、图表 | [dsh-research-core](https://github.com/yyh2030/dsh-research-core) |
+| `@local/research-core` | 1.2.0 | 共享核心:身份、数据、流程、结果、图表 | [dsh-research-core](https://github.com/yyh2030/dsh-research-core) |
 | `@local/study-ops` | 0.3.0 | 实验运行台:进度矩阵、异常、预约与随访 | [dsh-study-ops](https://github.com/yyh2030/dsh-study-ops) |
 | `@local/scale-desk` | 0.2.0 | 量表计分台:定义、录入、计分与校验 | [dsh-scale-desk](https://github.com/yyh2030/dsh-scale-desk) |
 | `@local/demographic-coder` | 1.2.0 | 人口学变量录入:导入问卷、编码、导出 | [dsh-demographic-coder](https://github.com/yyh2030/dsh-demographic-coder) |

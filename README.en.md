@@ -4,7 +4,7 @@
 
 The shared core for research plugins written for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`): study identity and binding, a unified data access layer, flow and observations, result rendering and charts. It is a Host-side library with no UI of its own.
 
-Version 1.1.0 · Requires DSH ≥ 0.2.2-rc.1 · MIT license
+Version 1.2.0 · Requires DSH ≥ 0.2.2-rc.1 · MIT license
 
 This repository also serves as the overview of the research plugin suite.
 
@@ -12,7 +12,7 @@ This repository also serves as the overview of the research plugin suite.
 
 | Package | Version | In one line | Repository |
 |---|---|---|---|
-| `@local/research-core` | 1.1.0 | Shared core: identity, data, flow, results, charts | [dsh-research-core](https://github.com/yyh2030/dsh-research-core) |
+| `@local/research-core` | 1.2.0 | Shared core: identity, data, flow, results, charts | [dsh-research-core](https://github.com/yyh2030/dsh-research-core) |
 | `@local/study-ops` | 0.3.0 | Experiment operations desk: progress matrix, anomalies, scheduling and follow-up | [dsh-study-ops](https://github.com/yyh2030/dsh-study-ops) |
 | `@local/scale-desk` | 0.2.0 | Scale scoring desk: definitions, entry, scoring and validation | [dsh-scale-desk](https://github.com/yyh2030/dsh-scale-desk) |
 | `@local/demographic-coder` | 1.2.0 | Demographics entry: import questionnaires, code, export | [dsh-demographic-coder](https://github.com/yyh2030/dsh-demographic-coder) |

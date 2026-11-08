@@ -88,6 +88,7 @@ test('subset=all 包含未入组；缺人口学的已入组编号被计数而不
 
 test('人口学里同一编号多行时中止该合并，不静默取舍', () => {
   const { study, data } = makeProject()
+  data.commit('participants', { participants: [{ participantKey: 'k1', participantId: 'P-001', status: 'enrolled', groups: {} }] }, { owner: 'test' })
   data.commit('demographics', demographics([['P-001', 'F', '20'], ['P-001', 'M', '21']]), { owner: 'test' })
   const analysis = openAnalysis({ data, study })
   assert.throws(() => analysis.dataset(), error => error instanceof AnalysisError && error.code === 'duplicate_record')

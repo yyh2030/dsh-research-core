@@ -21,7 +21,7 @@ import path from 'node:path'
 import { parseCsv } from './materials.mjs'
 
 export const FLOW_SCHEMA_VERSION = 1
-export const FLOW_VERSION = '4.0.0'
+export const FLOW_VERSION = '4.1.0'
 
 export const COLLECTION_STATES = ['not_due', 'missing', 'received', 'entered', 'complete', 'conflict']
 export const QUALITY_STATES = ['unchecked', 'valid', 'invalid', 'unscorable', 'unknown']
@@ -253,8 +253,9 @@ export function openFlow(options = {}) {
   }
 
   /**
-   * 人口学提交：先按策略把编号关联到参与者索引（registered，不自动入组），再提交人口学文档。
-   * 编号不存在且 createPending=false 时，返回 pending 列表而不是静默增加入组人数。
+   * 人口学提交：先完整校验文档与所有编号，再在**同一次研究事务**里提交
+   * participants（仅新增登记）与 demographics。任何校验或版本冲突都发生在写入之前，
+   * 因此检查失败不会留下"参与者已登记、人口学没提交"的半成品。
    */
   function commitDemographics(input = {}) {
     const document = input.document
@@ -262,30 +263,64 @@ export function openFlow(options = {}) {
     if (typeof document.schemaVersion !== 'number') throw new FlowError('invalid', '人口学文档需要 schemaVersion')
     const rows = Array.isArray(document.rows) ? document.rows : []
     const createPending = input.createPending !== false
+
+    // 第一步：只校验，不落盘。
+    const seen = new Set()
+    const ids = []
+    for (const row of rows) {
+      const id = asText(row && (row.participantId ?? row.id)).trim()
+      if (!id) continue
+      if (/[\u0000-\u001F\u007F]/u.test(id)) throw new FlowError('invalid', `参与者编号不能包含控制字符：${JSON.stringify(id)}`)
+      if (seen.has(id)) throw new FlowError('duplicate_record', `人口学文档里同一编号出现多行：${id}`)
+      seen.add(id)
+      ids.push(id)
+    }
+
+    // 第二步：在内存里准备参与者候选，不逐人提交。
+    const participants = participantsDoc()
     const created = []
     const pending = []
-    for (const row of rows) {
-      const id = asText(row.participantId ?? row.id).trim()
-      if (!id) continue
-      const existing = resolveParticipant(id)
-      if (existing) continue
-      if (createPending) {
-        registerParticipant({ participantId: id, status: 'registered', source: { type: 'demographics', path: input.sourcePath || null }, reason: '人口学录入时登记' })
-        created.push(id)
-      } else {
-        pending.push(id)
-      }
+    for (const id of ids) {
+      if (findParticipant(participants, id)) continue
+      if (!createPending) { pending.push(id); continue }
+      const at = nowIso()
+      participants.participants.push({
+        participantKey: newParticipantKey(id),
+        participantId: id,
+        aliases: [],
+        status: 'registered',
+        groups: {},
+        registeredAt: at,
+        updatedAt: at,
+        source: { type: 'demographics', path: input.sourcePath || null },
+        statusHistory: [{ status: 'registered', at, reason: '人口学录入时登记' }],
+      })
+      created.push(id)
     }
-    const participantsResult = data.commit('participants', participantsDoc(), { expectedRevision: recentRevision('participants'), owner, note: '人口学关联' })
-    const demographicsResult = data.commit('demographics', document, {
+
+    // 第三步：一次复合提交；预期版本在写盘前核对，冲突时两个数据集都不变。
+    const entries = []
+    if (created.length) entries.push({ name: 'participants', value: participants, expectedRevision: recentRevision('participants'), note: '人口学关联' })
+    entries.push({
+      name: 'demographics', value: document,
       expectedRevision: input.expectedRevision ?? recentRevision('demographics'),
-      owner,
-      mirrors: input.mirrors || [],
-      note: '人口学原始值 + 编码映射',
+      mirrors: input.mirrors || [], note: '人口学原始值 + 编码映射',
     })
+    const committed = data.commitMany(entries, { owner, timeoutMs: input.timeoutMs })
+    const byName = Object.fromEntries(committed.datasets.map(row => [row.dataset, row]))
     return {
-      participants: { revision: participantsResult.revision, contentHash: participantsResult.contentHash, created, pending },
-      demographics: { revision: demographicsResult.revision, contentHash: demographicsResult.contentHash },
+      participants: {
+        revision: byName.participants?.revision ?? null,
+        contentHash: byName.participants?.contentHash ?? null,
+        created, pending,
+        unchanged: Boolean(byName.participants?.unchanged),
+      },
+      demographics: {
+        revision: byName.demographics?.revision ?? null,
+        contentHash: byName.demographics?.contentHash ?? null,
+        unchanged: Boolean(byName.demographics?.unchanged),
+      },
+      transactionId: committed.transactionId,
     }
   }
 

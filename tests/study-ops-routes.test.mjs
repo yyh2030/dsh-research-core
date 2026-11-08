@@ -325,8 +325,12 @@ test('study_data_health 工具独立使用数据核心报告来源健康', async
   assert.ok(tool, '应注册 study_data_health 工具')
 
   // 用数据核心在合成研究 A 的数据根里提交一个已提交代次。
+  // 先让插件按绑定解析实例身份（工具输出里有），再用同一身份写数据；跨实例写入会被拒绝。
+  const firstRun = await tool.execute({}, { agent: { id: 's-a' } })
+  const instanceMatch = /实例\s+([A-Za-z0-9_-]+)/.exec(firstRun.text || '')
+  assert.ok(instanceMatch, '工具输出应包含实例身份：' + String(firstRun.text || '').slice(0, 200))
   const study = { id: 'study-a', name: '合成研究 A', path: fileA, dataRoot: path.join(wsA, 'data'), baseDir: wsA, plugin: {} }
-  const data = openResearchData({ study, instanceId: 'inst-health-test' })
+  const data = openResearchData({ study, instanceId: instanceMatch[1] })
   data.commit('demographics', { rows: [{ participantKey: 'k1', participantId: 'P-001' }] }, { owner: 'test' })
 
   const result = await tool.execute({ dataset: 'demographics' }, { agent: { id: 's-a' } })

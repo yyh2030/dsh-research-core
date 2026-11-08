@@ -29,7 +29,13 @@ const asText = value => (value === null || value === undefined ? '' : String(val
 
 function readDataset(data, name) {
   const result = data.read(name)
-  return { value: result.value, revision: result.revision || 0, contentHash: result.contentHash || null, state: result.health && result.health.state }
+  return {
+    value: result.value,
+    revision: result.revision || 0,
+    contentHash: result.contentHash || null,
+    state: result.health && result.health.state,
+    error: result.health && result.health.error,
+  }
 }
 
 /** 人口学取值：同时接受 {id, values:{...}} 与扁平 {id, 列: 值} 两种行。 */
@@ -37,6 +43,19 @@ function demographicValue(row, column) {
   if (!row) return undefined
   if (row.values && Object.hasOwn(row.values, column)) return row.values[column]
   return row[column]
+}
+
+const MISSING_STATES = new Set(['unconfigured', 'missing', 'empty'])
+const BROKEN_STATES = new Set(['invalid', 'unreadable', 'conflict'])
+
+/** 损坏来源立即阻断；必需来源未初始化时明确报"等待初始化"，不生成空表。 */
+function requireSource(meta, name, { required }) {
+  if (BROKEN_STATES.has(meta.state)) {
+    throw new AnalysisError('source_unreadable', `数据集 ${name} 不可用（${meta.state}）${meta.error ? '：' + meta.error : ''}`, { dataset: name, state: meta.state })
+  }
+  if (MISSING_STATES.has(meta.state) && required) {
+    throw new AnalysisError('source_unconfigured', `数据集 ${name} 尚未初始化（${meta.state}），等待数据录入后再分析`, { dataset: name, state: meta.state })
+  }
 }
 
 export function openAnalysis({ data, study, owner = 'analysis-run' }) {
@@ -79,6 +98,9 @@ export function openAnalysis({ data, study, owner = 'analysis-run' }) {
     const participantsResult = participantsDoc()
     const demographics = demographicsDoc()
     const observationsResult = observationsDoc()
+    requireSource(participantsResult.meta, 'participants', { required: true })
+    requireSource(demographics.meta, 'demographics', { required: false })
+    requireSource(observationsResult.meta, 'observations', { required: false })
     const tasks = Array.isArray(study.tasks) ? study.tasks : []
     const variables = Array.isArray(plan.variables) && plan.variables.length ? plan.variables : defaultVariables(demographics, tasks)
 

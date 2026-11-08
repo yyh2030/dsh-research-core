@@ -31,7 +31,7 @@ import path from 'node:path'
 export const DATA_SCHEMA_VERSION = 1
 export const MANIFEST_SCHEMA_VERSION = 1
 export const CHANGE_SCHEMA_VERSION = 1
-export const DATA_VERSION = '2.0.0'
+export const DATA_VERSION = '2.1.0'
 
 const HOSTNAME = os.hostname()
 // 启动时刻（秒级近似）：os.uptime() 的分辨率让两个进程可能差 1 秒，比较时给容差。
@@ -210,17 +210,128 @@ export function openResearchData(options = {}) {
 
   function generationDir(name) { return path.join(dirs.generations, name) }
   function currentFile(name) { return path.join(generationDir(name), 'current.json') }
-  function head(name) { return readJson(currentFile(name), null) }
+  function pointerFile() { return path.join(dirs.transactions, 'study-pointer.json') }
+
+  /** 读研究级提交指针：多数据集事务先写指针，再补写各 current.json。 */
+  function readPointer() {
+    const file = pointerFile()
+    if (!existsSync(file)) return { state: 'missing', datasets: {} }
+    let text
+    try { text = readFileSync(file, 'utf8') } catch (error) { return { state: 'unreadable', error: error.message, datasets: {} } }
+    try {
+      const doc = JSON.parse(text)
+      if (!doc || typeof doc !== 'object' || !doc.datasets || typeof doc.datasets !== 'object') return { state: 'malformed', datasets: {}, error: '提交指针结构不完整' }
+      return { state: 'ok', datasets: doc.datasets }
+    } catch (error) { return { state: 'malformed', datasets: {}, error: error.message } }
+  }
+
+  /** 读取某数据集当前代次：取 current.json 与指针中 revision 更大的那个。 */
+  function head(name) {
+    const current = readJson(currentFile(name), null)
+    const pointer = readPointer()
+    if (pointer.state === 'malformed' || pointer.state === 'unreadable') {
+      throw new DataError('recovery_required', `研究提交指针不可读：${pointer.error}`, { localDetailsRef: pointerFile() })
+    }
+    const entry = pointer.datasets[name]
+    if (entry && Number(entry.revision) > Number(current?.revision || 0)) {
+      return {
+        schemaVersion: DATA_SCHEMA_VERSION, dataset: name, generationId: entry.generationId,
+        revision: Number(entry.revision), contentHash: entry.contentHash, committedAt: entry.at || null,
+        studyId, instanceId, fromPointer: true,
+      }
+    }
+    return current
+  }
+
+  /** 把某数据集的提交结果写进研究指针（单数据集提交与复合提交共用）。 */
+  function publishPointer(name, entry) {
+    const pointer = readPointer()
+    const datasets = { ...(pointer.state === 'ok' ? pointer.datasets : {}), [name]: { ...entry, at: new Date().toISOString() } }
+    writeAtomic(pointerFile(), JSON.stringify({ schemaVersion: 1, studyId, instanceId, at: new Date().toISOString(), datasets }, null, 2))
+  }
+
+  /** 指针已指向新代但 current.json 还没写完（崩溃窗口）时，按指针补齐；幂等。 */
+  function reconcile() {
+    const pointer = readPointer()
+    if (pointer.state !== 'ok') return []
+    const repaired = []
+    for (const [name, entry] of Object.entries(pointer.datasets)) {
+      const current = readJson(currentFile(name), null)
+      if (Number(current?.revision || 0) >= Number(entry.revision)) continue
+      const manifest = readJson(path.join(generationDir(name), entry.generationId, 'manifest.json'), null)
+      if (!manifest || manifest.contentHash !== entry.contentHash) continue
+      writeAtomic(currentFile(name), JSON.stringify({
+        schemaVersion: DATA_SCHEMA_VERSION, dataset: name, generationId: entry.generationId, revision: Number(entry.revision),
+        contentHash: entry.contentHash, committedAt: manifest.createdAt, studyId, instanceId,
+      }, null, 2))
+      repaired.push(name)
+    }
+    return repaired
+  }
 
   /* ---------- 实例认领 ---------- */
 
+  /** 读取实例文件并区分：缺失 / 无法解析 / 可读。只读，不创建、不修复。 */
+  function instanceState() {
+    const target = dirs.instance
+    if (!existsSync(target)) return { state: 'missing' }
+    let text
+    try { text = readFileSync(target, 'utf8') } catch (error) {
+      return { state: 'unreadable', error: error.message }
+    }
+    try {
+      const record = JSON.parse(text)
+      if (!record || typeof record !== 'object' || Array.isArray(record)) return { state: 'malformed', error: '实例记录不是对象' }
+      return { state: 'ok', record }
+    } catch (error) {
+      return { state: 'malformed', error: error.message }
+    }
+  }
+
+  /** 数据根里是否已有任何已提交代次。用于区分"未初始化"与"身份文件丢了"。 */
+  function hasCommittedData() {
+    if (!existsSync(dirs.generations)) return false
+    let names = []
+    try { names = readdirSync(dirs.generations) } catch { return false }
+    return names.some(name => existsSync(path.join(dirs.generations, name, 'current.json')))
+  }
+
+  /**
+   * 所有读取入口的身份断言：实例文件存在时校验身份；缺失但已有已提交数据时报需要恢复；
+   * 完全未初始化时允许空读。只读，不创建实例、不修复数据根。
+   */
+  function assertInstanceReadable() {
+    const state = instanceState()
+    if (state.state === 'ok') {
+      const record = state.record
+      if (record.schemaVersion !== DATA_SCHEMA_VERSION) throw new DataError('source_invalid', `不支持的实例记录版本：${record.schemaVersion}`, { localDetailsRef: dirs.instance })
+      if (String(record.studyId) !== studyId) throw new DataError('wrong_instance', `数据根属于另一项研究（${record.studyId}），当前是 ${studyId}`, { localDetailsRef: dirs.instance })
+      if (String(record.instanceId) !== instanceId) throw new DataError('wrong_instance', `数据根属于另一研究实例（${record.instanceId}），当前是 ${instanceId}`, { localDetailsRef: dirs.instance })
+      return record
+    }
+    if (state.state === 'unreadable' || state.state === 'malformed') {
+      throw new DataError('recovery_required', `研究实例身份文件无法解析：${state.error}`, { localDetailsRef: dirs.instance })
+    }
+    if (hasCommittedData()) {
+      throw new DataError('recovery_required', '数据根已有已提交数据但缺少研究实例身份，需要恢复', { localDetailsRef: dirs.instance })
+    }
+    return null
+  }
+
   function ensureInstance({ create = false } = {}) {
-    const record = readJson(dirs.instance, null)
-    if (record) {
-      if (record.schemaVersion !== DATA_SCHEMA_VERSION) throw new DataError('source_invalid', `不支持的实例记录版本：${record.schemaVersion}`)
-      if (String(record.studyId) !== studyId) throw new DataError('wrong_instance', `数据根属于另一项研究（${record.studyId}），当前是 ${studyId}`)
-      if (String(record.instanceId) !== instanceId) throw new DataError('wrong_instance', `数据根属于另一研究实例（${record.instanceId}），当前是 ${instanceId}`)
+    const state = instanceState()
+    if (state.state === 'ok') {
+      const record = state.record
+      if (record.schemaVersion !== DATA_SCHEMA_VERSION) throw new DataError('source_invalid', `不支持的实例记录版本：${record.schemaVersion}`, { localDetailsRef: dirs.instance })
+      if (String(record.studyId) !== studyId) throw new DataError('wrong_instance', `数据根属于另一项研究（${record.studyId}），当前是 ${studyId}`, { localDetailsRef: dirs.instance })
+      if (String(record.instanceId) !== instanceId) throw new DataError('wrong_instance', `数据根属于另一研究实例（${record.instanceId}），当前是 ${instanceId}`, { localDetailsRef: dirs.instance })
       return { ...record, created: false }
+    }
+    if (state.state === 'unreadable' || state.state === 'malformed') {
+      throw new DataError('recovery_required', `研究实例身份文件无法解析：${state.error}`, { committed: false, localDetailsRef: dirs.instance })
+    }
+    if (hasCommittedData()) {
+      throw new DataError('recovery_required', '数据根已有已提交数据但缺少研究实例身份，需要恢复；不会自动重新认领', { committed: false, localDetailsRef: dirs.instance })
     }
     if (!create) return { schemaVersion: DATA_SCHEMA_VERSION, studyId, instanceId, missing: true }
     mkdirSync(root, { recursive: true })
@@ -233,8 +344,30 @@ export function openResearchData(options = {}) {
 
   function lockFile(name) { return path.join(dirs.transactions, `lock-${sha(name, 16)}.json`) }
 
+  /**
+   * 读取锁文件并区分状态：missing（文件不在）/ unreadable（读失败）/
+   * malformed（空、截断、非对象）/ ok（可解析的记录）。
+   * 只读，不清理、不修复。
+   */
+  function readLock(file) {
+    let text
+    try { text = readFileSync(file, 'utf8') } catch (error) {
+      if (error.code === 'ENOENT') return { state: 'missing' }
+      return { state: 'unreadable', error: error.message }
+    }
+    if (!text.trim()) return { state: 'malformed', error: '锁文件为空' }
+    let record
+    try { record = JSON.parse(text) } catch (error) {
+      return { state: 'malformed', error: error.message }
+    }
+    if (!record || typeof record !== 'object' || Array.isArray(record)) return { state: 'malformed', error: '锁内容不是对象' }
+    return { state: 'ok', record }
+  }
+
   function lockState(record) {
-    if (!record) return 'missing'
+    // 字段缺失一律视为"身份不明"：既不能判活，也不能判旧锁。
+    if (!record || typeof record !== 'object') return 'malformed'
+    if (!record.hostname || !Number.isFinite(Number(record.processId)) || !record.startedAt) return 'unknown'
     if (record.hostname !== HOSTNAME) return 'other-host'
     if (!sameBoot(record.bootId, BOOT_ID)) return 'stale-reboot'
     return pidAlive(Number(record.processId)) ? 'held' : 'stale-dead'
@@ -243,12 +376,21 @@ export function openResearchData(options = {}) {
   /**
    * 取锁。失败时返回 dataset_conflict（retryable），绝不按 TTL 抢锁；
    * 只有"同主机、同启动实例、进程已退出"或"启动实例不同（重启过）"才清理。
+   * 锁文件损坏时在短暂退避后返回 recovery_required，不删除、不无限重试。
    */
   function acquire(name, { owner = 'unknown', transactionId = `tx-${randomUUID()}`, timeoutMs = 1500 } = {}) {
     mkdirSync(dirs.transactions, { recursive: true })
     const file = lockFile(name)
     const deadline = Date.now() + timeoutMs
+    const badGraceMs = Math.min(400, Math.max(100, Math.floor(timeoutMs / 2)))
+    let badSince = 0
     for (;;) {
+      if (Date.now() >= deadline) {
+        const current = head(name)
+        throw new DataError('dataset_conflict', `数据集 ${name} 正在被另一进程写入`, {
+          committed: false, retryable: true, currentRevision: current?.revision ?? 0, localDetailsRef: file,
+        })
+      }
       const record = {
         schemaVersion: DATA_SCHEMA_VERSION, dataset: name, processId: process.pid, hostname: HOSTNAME,
         bootId: BOOT_ID, transactionId, owner, studyId, instanceId, startedAt: new Date().toISOString(),
@@ -259,29 +401,52 @@ export function openResearchData(options = {}) {
         return {
           transactionId,
           release() {
-            const current = readJson(file, null)
-            if (current && current.transactionId === transactionId) rmSync(file, { force: true })
+            const current = readLock(file)
+            if (current.state === 'ok' && current.record.transactionId === transactionId) rmSync(file, { force: true })
           },
         }
       } catch (error) {
         if (error.code !== 'EEXIST') throw error
       }
-      const held = readJson(file, null)
-      const state = lockState(held)
-      if (state === 'missing') continue
+      const lock = readLock(file)
+      if (lock.state === 'missing') { badSince = 0; sleepSync(10); continue }
+      if (lock.state === 'unreadable' || lock.state === 'malformed') {
+        if (!badSince) badSince = Date.now()
+        if (Date.now() - badSince >= badGraceMs || Date.now() >= deadline) {
+          throw new DataError('recovery_required', `数据集 ${name} 的锁文件损坏，需要恢复：${lock.error}`, {
+            committed: false, retryable: false, currentRevision: head(name)?.revision ?? 0, localDetailsRef: file,
+          })
+        }
+        sleepSync(25)
+        continue
+      }
+      badSince = 0
+      const state = lockState(lock.record)
       if (state === 'stale-dead' || state === 'stale-reboot') {
         const archive = path.join(dirs.transactions, 'stale', `lock-${sha(name, 16)}-${Date.now()}.json`)
         mkdirSync(path.dirname(archive), { recursive: true })
         try { renameSync(file, archive) } catch { /* 另一个进程已清理 */ }
         continue
       }
-      if (Date.now() >= deadline) {
-        const current = head(name)
-        throw new DataError('dataset_conflict', `数据集 ${name} 正在被 ${held?.owner || '另一进程'} 写入`, {
-          committed: false, retryable: true, currentRevision: current?.revision ?? 0, localDetailsRef: file,
+      if (state === 'unknown') {
+        throw new DataError('recovery_required', `数据集 ${name} 的锁缺少可判定的持有者信息，需要恢复`, {
+          committed: false, retryable: false, currentRevision: head(name)?.revision ?? 0, localDetailsRef: file,
         })
       }
-      sleepSync(25)
+      if (state === 'malformed') {
+        throw new DataError('recovery_required', `数据集 ${name} 的锁内容无法识别，需要恢复`, {
+          committed: false, retryable: false, currentRevision: head(name)?.revision ?? 0, localDetailsRef: file,
+        })
+      }
+      if (state === 'held' || state === 'other-host') {
+        if (Date.now() >= deadline) {
+          const current = head(name)
+          throw new DataError('dataset_conflict', `数据集 ${name} 正在被 ${lock.record.owner || '另一进程'} 写入`, {
+            committed: false, retryable: true, currentRevision: current?.revision ?? 0, localDetailsRef: file,
+          })
+        }
+        sleepSync(25)
+      }
     }
   }
 
@@ -315,6 +480,7 @@ export function openResearchData(options = {}) {
   const HEALTH = ['unconfigured', 'missing', 'empty', 'ok', 'invalid', 'unreadable', 'conflict']
 
   function read(name, options = {}) {
+    assertInstanceReadable()
     const current = head(name)
     if (!current) {
       return {
@@ -333,6 +499,22 @@ export function openResearchData(options = {}) {
     const folder = path.join(generationDir(name), current.generationId)
     const manifest = readJson(path.join(folder, 'manifest.json'), null)
     if (!manifest) return { dataset: name, value: null, revision: current.revision, health: { state: 'conflict', error: '已提交代次的 manifest 缺失' } }
+    // manifest 必须指同一实例、同一数据集、同一代次；被篡改时拒绝读取而不是照常返回旧值。
+    if (manifest.schemaVersion !== MANIFEST_SCHEMA_VERSION) {
+      throw new DataError('source_invalid', `代次 manifest 版本不支持：${manifest.schemaVersion}`, { localDetailsRef: path.join(folder, 'manifest.json') })
+    }
+    if (manifest.studyId !== undefined && String(manifest.studyId) !== studyId) {
+      throw new DataError('wrong_instance', `代次 manifest 属于研究 ${manifest.studyId}，当前是 ${studyId}`, { localDetailsRef: path.join(folder, 'manifest.json') })
+    }
+    if (manifest.instanceId !== undefined && String(manifest.instanceId) !== instanceId) {
+      throw new DataError('wrong_instance', `代次 manifest 属于实例 ${manifest.instanceId}，当前是 ${instanceId}`, { localDetailsRef: path.join(folder, 'manifest.json') })
+    }
+    if (manifest.dataset !== undefined && String(manifest.dataset) !== name) {
+      throw new DataError('source_invalid', `代次 manifest 记录的数据集是 ${manifest.dataset}，不是 ${name}`, { localDetailsRef: path.join(folder, 'manifest.json') })
+    }
+    if (manifest.generationId !== undefined && String(manifest.generationId) !== String(current.generationId)) {
+      throw new DataError('source_invalid', `代次 manifest 的 generationId 与当前指针不一致`, { localDetailsRef: path.join(folder, 'manifest.json') })
+    }
     const dataFile = path.join(folder, 'data.json')
     const info = statOf(dataFile)
     if (!info) return { dataset: name, value: null, revision: current.revision, health: { state: 'conflict', error: '已提交代次的数据文件缺失' } }
@@ -370,13 +552,23 @@ export function openResearchData(options = {}) {
   }
 
   function health(name) {
+    // 错实例/身份损坏必须冒泡，不能降级成 invalid 让调用方以为只是数据坏了。
+    const instance = instanceState()
+    if (instance.state === 'unreadable' || instance.state === 'malformed') {
+      throw new DataError('recovery_required', `研究实例身份文件无法解析：${instance.error}`, { localDetailsRef: dirs.instance })
+    }
+    assertInstanceReadable()
     if (!name) {
       const names = new Set([...Object.keys(DEFAULT_DATASETS), ...Object.keys(overrides)])
       return [...names].map(item => health(item))
     }
     let committed
     try { const result = read(name); committed = { state: result.health.state, revision: result.revision, generationId: result.generationId, contentHash: result.contentHash } }
-    catch (error) { committed = { state: 'invalid', error: error.message } }
+    catch (error) {
+      // 身份类错误原样冒泡；只有数据损坏才映射为 invalid 健康状态。
+      if (error instanceof DataError && ['wrong_instance', 'recovery_required'].includes(error.code)) throw error
+      committed = { state: 'invalid', error: error.message }
+    }
     let legacy
     try { legacy = legacyHealth(name) } catch (error) { legacy = { state: 'invalid', error: error.message } }
     // 损坏的兼容文件不能因为还没有已提交代次就被降级成"尚未录入"。
@@ -479,6 +671,7 @@ export function openResearchData(options = {}) {
           schemaVersion: DATA_SCHEMA_VERSION, dataset: name, generationId, revision,
           contentHash, committedAt: manifest.createdAt, studyId, instanceId,
         }, null, 2))
+        publishPointer(name, { dataset: name, transactionId, generationId, revision, contentHash })
         const mirrorResults = []
         for (const mirror of mirrors) {
           try {
@@ -517,6 +710,112 @@ export function openResearchData(options = {}) {
   function withLock(name, { owner, timeoutMs, transactionId }, run) {
     const lock = acquire(name, { owner, timeoutMs, transactionId })
     try { return run() } finally { lock.release() }
+  }
+
+  /**
+   * 复合提交：多个数据集在同一次研究事务里发布。
+   * 顺序是：按名字排序取锁 → 校验预期版本 → 写各代次目录 → 写研究指针（唯一可见提交点）
+   * → 补写各 current.json（兼容读取）→ 追加变化记录 → 写镜像。
+   * 指针写入前崩溃：读者只看到完整旧事务；指针写入后崩溃：指针已是新事务，reconcile() 补 current。
+   */
+  function commitMany(entries, options = {}) {
+    if (!Array.isArray(entries) || !entries.length) throw new DataError('invalid', '复合提交至少需要一个数据集')
+    const owner = options.owner || 'unknown'
+    const names = [...new Set(entries.map(entry => entry.name))]
+    if (names.length !== entries.length) throw new DataError('invalid', '复合提交里同一数据集出现多次')
+    const locks = []
+    try {
+      for (const name of names.slice().sort()) locks.push(acquire(name, { owner, timeoutMs: options.timeoutMs }))
+      ensureInstance({ create: true })
+      reconcile()
+      const prepared = []
+      for (const entry of entries) {
+        const text = JSON.stringify(entry.value, null, 2)
+        const contentHash = sha(text)
+        const current = head(entry.name)
+        const previousRevision = Number(current?.revision) || 0
+        const expected = entry.expectedRevision
+        if (expected !== undefined && expected !== null && String(expected) !== '') {
+          const accepted = [String(previousRevision), current?.contentHash || 'empty', current?.generationId].filter(Boolean).map(String)
+          if (!accepted.includes(String(expected))) {
+            throw new DataError('dataset_conflict', `数据集 ${entry.name} 的预期版本 ${expected} 与当前 ${previousRevision} 不一致`, {
+              committed: false, retryable: false, currentRevision: previousRevision, localDetailsRef: currentFile(entry.name),
+            })
+          }
+        }
+        prepared.push({ ...entry, text, contentHash, current, previousRevision })
+      }
+      const written = []
+      try {
+        for (const item of prepared) {
+          if (item.current && item.current.contentHash === item.contentHash) { item.unchanged = true; continue }
+          const revision = item.previousRevision + 1
+          const generationId = `g${String(revision).padStart(6, '0')}-${item.contentHash.slice(0, 8)}`
+          const staging = path.join(dirs.transactions, `tx-${randomUUID()}`)
+          const folder = path.join(generationDir(item.name), generationId)
+          mkdirSync(staging, { recursive: true })
+          writeFileSync(path.join(staging, 'data.json'), item.text, 'utf8')
+          const files = [{ role: 'data', relativePath: 'data.json', sha256: item.contentHash, bytes: Buffer.byteLength(item.text) }]
+          const manifest = {
+            schemaVersion: MANIFEST_SCHEMA_VERSION, generationId, dataset: item.name, studyId, instanceId,
+            revision, contentHash: item.contentHash, createdAt: new Date().toISOString(), owner,
+            inputs: item.inputs || [], files, corrects: item.corrects || null, operationId: item.operationId || null,
+            note: item.note || '', transactionId: options.transactionId || null,
+          }
+          writeFileSync(path.join(staging, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf8')
+          verifyFiles(staging, files)
+          mkdirSync(generationDir(item.name), { recursive: true })
+          if (existsSync(folder)) throw new DataError('source_invalid', `代次目录已存在：${generationId}`)
+          renameSync(staging, folder)
+          written.push({ item, revision, generationId, manifest })
+        }
+        // 事务可见边界：一次写入指针，读者同时看到所有数据集的新代。
+        const pointer = readPointer()
+        const datasets = { ...(pointer.state === 'ok' ? pointer.datasets : {}) }
+        for (const item of prepared) {
+          if (item.unchanged) continue
+          const row = written.find(entry => entry.item === item)
+          datasets[item.name] = { dataset: item.name, revision: row.revision, generationId: row.generationId, contentHash: item.contentHash, at: new Date().toISOString() }
+        }
+        const transactionId = options.transactionId || `tx-${randomUUID()}`
+        writeAtomic(pointerFile(), JSON.stringify({ schemaVersion: 1, studyId, instanceId, transactionId, at: new Date().toISOString(), datasets }, null, 2))
+        // 指针之后补 current.json（兼容读取）；失败由 reconcile 修复。
+        for (const row of written) {
+          writeAtomic(currentFile(row.item.name), JSON.stringify({
+            schemaVersion: DATA_SCHEMA_VERSION, dataset: row.item.name, generationId: row.generationId, revision: row.revision,
+            contentHash: row.item.contentHash, committedAt: row.manifest.createdAt, studyId, instanceId,
+          }, null, 2))
+        }
+        for (const row of written) {
+          appendChange({
+            schemaVersion: CHANGE_SCHEMA_VERSION, changeId: `chg-${randomUUID()}`, seq: row.revision, dataset: row.item.name,
+            oldRevision: row.item.previousRevision, newRevision: row.revision, oldGenerationId: row.item.current?.generationId || null,
+            newGenerationId: row.generationId, contentHash: row.item.contentHash, studyId, instanceId, owner,
+            operationId: row.manifest.operationId, corrects: row.manifest.corrects, committedAt: row.manifest.createdAt,
+          })
+        }
+        for (const item of prepared) {
+          for (const mirror of item.mirrors || []) {
+            const bytes = Buffer.from(String(mirror.text ?? ''), 'utf8')
+            const relativePath = String(mirror.relativePath || '')
+            const target = path.isAbsolute(relativePath) ? relativePath : path.join(root, relativePath)
+            if (!relativePath || !isInside(root, target)) throw new DataError('source_invalid', `镜像路径越界：${relativePath}`)
+            try { writeAtomicBytes(target, bytes) } catch { /* 镜像是可重建派生，失败不回滚原始提交 */ }
+          }
+        }
+        return {
+          transactionId,
+          datasets: prepared.map(item => written.some(row => row.item === item)
+            ? { dataset: item.name, committed: true, changed: true, ...written.find(row => row.item === item) }
+            : { dataset: item.name, committed: true, unchanged: true, revision: item.previousRevision, contentHash: item.contentHash }),
+        }
+      } catch (error) {
+        if (error instanceof DataError) throw error
+        throw new DataError('source_invalid', `复合提交失败：${error.message}`, { committed: false, retryable: false })
+      }
+    } finally {
+      for (const lock of locks.reverse()) lock.release()
+    }
   }
 
   /* ---------- 恢复 ---------- */
@@ -585,6 +884,7 @@ export function openResearchData(options = {}) {
   /* ---------- 备份 / 恢复 ---------- */
 
   function backup(targetDir, options = {}) {
+    assertInstanceReadable()
     const target = strictLocal ? assertLocalPath(targetDir) : path.resolve(targetDir)
     const stamp = new Date().toISOString().replace(/[:.]/g, '-')
     const folder = path.join(target, `backup-${stamp}`)
@@ -628,6 +928,7 @@ export function openResearchData(options = {}) {
   }
 
   function restorePreflight(folder) {
+    assertInstanceReadable()
     const source = path.resolve(folder)
     const document = readJson(path.join(source, 'backup.json'), null)
     if (!document) return { ok: false, problems: ['缺少 backup.json'], folder: source }
@@ -659,6 +960,8 @@ export function openResearchData(options = {}) {
       throw new DataError('source_invalid', `恢复预检未通过：${preflight.problems.join('；')}`, { committed: false, retryable: false, details: preflight })
     }
     const document = preflight.document
+    // 先认领实例身份再写代次：恢复到全新数据根时，写数据会触发"有数据但无身份"的保护。
+    const instanceRestored = ensureInstance({ create: true })
     const restored = []
     for (const row of document.datasets || []) {
       const manifest = row.manifest
@@ -680,7 +983,6 @@ export function openResearchData(options = {}) {
       }, null, 2))
       restored.push({ dataset: row.dataset, revision: row.revision, generationId: row.generationId })
     }
-    const instanceRestored = ensureInstance({ create: true })
     appendChange({
       schemaVersion: CHANGE_SCHEMA_VERSION, changeId: `chg-${randomUUID()}`, seq: readChanges().seq,
       dataset: '__restore__', oldRevision: null, newRevision: null, studyId, instanceId,
@@ -701,9 +1003,12 @@ export function openResearchData(options = {}) {
     ensureInstance,
     read,
     commit,
+    commitMany,
+    reconcile,
     health,
     head: name => head(name),
     history(name) {
+      assertInstanceReadable()
       const rows = []
       for (const generation of listChildren(generationDir(name)).sort()) {
         const manifest = readJson(path.join(generationDir(name), generation, 'manifest.json'), null)
