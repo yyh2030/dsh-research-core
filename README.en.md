@@ -16,7 +16,7 @@ This repository also serves as the overview of the research plugin suite.
 | `@local/study-ops` | 0.3.0 | Experiment operations desk: progress matrix, anomalies, scheduling and follow-up | [dsh-study-ops](https://github.com/yyh2030/dsh-study-ops) |
 | `@local/scale-desk` | 0.2.0 | Scale scoring desk: definitions, entry, scoring and validation | [dsh-scale-desk](https://github.com/yyh2030/dsh-scale-desk) |
 | `@local/demographic-coder` | 1.2.0 | Demographics entry: import questionnaires, code, export | [dsh-demographic-coder](https://github.com/yyh2030/dsh-demographic-coder) |
-| `@local/analysis-run` | 0.2.0 | Analysis straight-through: plan wizard, analysis modules, reproducible snapshots | [dsh-analysis-run](https://github.com/yyh2030/dsh-analysis-run) |
+| `@local/analysis-run` | 0.2.0 | Analysis Runner: plan wizard, analysis modules, reproducible snapshots | [dsh-analysis-run](https://github.com/yyh2030/dsh-analysis-run) |
 
 Data flows roughly like this: the demographics and scale plugins write data into the core's datasets, the ops desk reads core projections to see progress and anomalies, and analysis-run assembles an analysis table from committed generations. All four business plugins reference this repository through the relative path `../research-core/…`, so the five repositories must sit in the same parent directory.
 
