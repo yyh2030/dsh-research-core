@@ -1,0 +1,38 @@
+{
+  "name": "@local/research-core",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "description": "本地研究核心：研究身份与绑定、统一数据访问层（事务/代次/锁/恢复/备份）与隐私边界。不提供独立界面。",
+  "exports": {
+    ".": "./index.mjs",
+    "./host": "./host.mjs",
+    "./data": "./data.mjs",
+    "./privacy": "./privacy.mjs",
+    "./materials": "./materials.mjs",
+    "./flow": "./flow.mjs",
+    "./analysis": "./analysis.mjs",
+    "./results": "./results.mjs",
+    "./charts": "./charts.mjs"
+  },
+  "main": "./index.mjs",
+  "files": [
+    "index.mjs",
+    "host.mjs",
+    "data.mjs",
+    "privacy.mjs",
+    "materials.mjs",
+    "materials_parse.py",
+    "flow.mjs",
+    "analysis.mjs",
+    "results.mjs",
+    "charts.mjs",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dsh": {
+    "minVersion": "0.2.2-rc.1"
+  }
+}
