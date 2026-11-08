@@ -178,6 +178,7 @@ export function buildResults({ run, meta, tables = [], labels = LABELS }) {
       title: table.title || labelFor(table.key, labels),
       nodeId,
       analysisSet: table.analysisSet || analysisSet,
+      types: table.types || null,
       sourceHash: table.sourceHash || sourceHash,
       columns: (table.columns || []).map(column => {
         const key = typeof column === 'string' ? column : column.key
@@ -204,16 +205,20 @@ export function buildResults({ run, meta, tables = [], labels = LABELS }) {
 }
 
 /** CSV 网格 → 结果表：表头做双语标签，数值列转成数字（编号/文本保留原样）。 */
-export function tableFromGrid({ key, columns = [], rows = [], labels = LABELS }) {
+export function tableFromGrid({ key, columns = [], rows = [], labels = LABELS, types = null, analysisSet = null, nodeId = null, title = null }) {
   const numeric = /^-?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/
   const columnsTyped = columns.map(column => ({ key: column, ...labelFor(column, labels) }))
   const objects = rows.map(row => Object.fromEntries(columns.map((column, index) => {
     const raw = row[index] === undefined ? '' : row[index]
     if (raw === '') return [column, null]
+    const declared = types && types[column]
+    // 引擎声明的列类型优先：编号/组水平保持原文（"001" 不能变成 1），数值列才转数字。
+    if (declared === 'string') return [column, raw]
+    if (declared === 'number') return [column, numeric.test(raw) ? Number(raw) : raw]
     return [column, numeric.test(raw) ? Number(raw) : raw]
   })))
   const numericKeys = new Set(columns.filter(column => objects.some(row => typeof row[column] === 'number')))
-  return { key, columns: columnsTyped, rows: objects, numericKeys: [...numericKeys] }
+  return { key, columns: columnsTyped, rows: objects, numericKeys: [...numericKeys], types: types || null, analysisSet, nodeId, title }
 }
 
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]))
@@ -221,11 +226,14 @@ const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '
 /** 三线表：顶线、表头下线、底线由 CSS 类控制，无竖线。 */
 export function renderTableHtml(table, options = {}) {
   const decimals = options.decimals ?? 2
-  // 一列里只要出现过数值，就整列按数值列处理：表头与单元格用同一种对齐，避免"表头靠左、数字靠右"的错位感。
-  const numericColumns = new Set(table.columns.filter(column => table.rows.some(row => {
-    const value = row[column.key]
-    return typeof value === 'number' || (value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)))
-  })).map(column => column.key))
+  const declared = options.types || table.types || null
+  // 有引擎声明类型时按声明判定数值列；否则退回值推断。避免把编号/组水平当数字。
+  const numericColumns = new Set(table.columns.filter(column => declared
+    ? declared[column.key] === 'number'
+    : table.rows.some(row => {
+      const value = row[column.key]
+      return typeof value === 'number' || (value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)))
+    })).map(column => column.key))
   const head = table.columns.map(column => `<th${numericColumns.has(column.key) ? ' class="num"' : ''} scope="col"><span class="zh">${escapeHtml(column.zh)}</span><span class="en">${escapeHtml(column.en)}</span></th>`).join('')
   const body = table.rows.map(row => `<tr>${table.columns.map(column => {
     const value = row[column.key]

@@ -71,7 +71,7 @@ test('配对轨迹：每个参与者一条线，均值为粗线，n 与单位标
   assert.match(chart.svg, /不把观测行当独立样本/)
 })
 
-test('分布图：散点条带 + 箱线，须为 1.5 IQR 内极值，n 与中位数可核对', () => {
+test('分布图：散点条带 + 箱线，须为 1.5 IQR 内的真实极值，n 与中位数可核对', () => {
   const chart = distributionChart({ title: '分布', groups: [
     { label: 'A', values: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20] },
     { label: 'B', values: [2, 4, 6, 8] },
@@ -83,7 +83,7 @@ test('分布图：散点条带 + 箱线，须为 1.5 IQR 内极值，n 与中位
   assert.equal(a.median, 6)
   assert.equal(a.q1, 3.5)
   assert.equal(a.q3, 8.5)
-  assert.equal(a.high, 16, '上须应封到 1.5 IQR 内（20 是离群点）')
+  assert.equal(a.high, 10, '上须应是 1.5 IQR 内的真实极值（20 是离群点，围栏 16 不是观测值）')
   assert.equal(chart.summary.observations, 15)
   assert.match(chart.svg, /n=11/)
   assert.match(chart.svg, /不假设正态/)

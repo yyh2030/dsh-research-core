@@ -237,8 +237,11 @@ export function distributionChart({ title, subtitle, groups = [], width = 960, h
     const sorted = group.values.slice().sort((a, b) => a - b)
     const q1 = quantile(sorted, 0.25); const median = quantile(sorted, 0.5); const q3 = quantile(sorted, 0.75)
     const iqr = q3 - q1
-    const low = Math.max(sorted[0], q1 - 1.5 * iqr)
-    const high = Math.min(sorted[sorted.length - 1], q3 + 1.5 * iqr)
+    const lowerFence = q1 - 1.5 * iqr
+    const upperFence = q3 + 1.5 * iqr
+    // 须画到“围栏内的真实极值”，不是围栏本身；围栏外的点仍作为离群点画出。
+    const low = sorted.find(value => value >= lowerFence) ?? sorted[0]
+    const high = [...sorted].reverse().find(value => value <= upperFence) ?? sorted[sorted.length - 1]
     const color = PALETTE[index % PALETTE.length]
     // 散点条带（每个观测一个点，水平抖动固定，可复现）
     const jitter = Math.min(26, columnWidth * 0.32)
