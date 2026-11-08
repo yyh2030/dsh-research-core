@@ -189,7 +189,7 @@ evaluatePrivacy({ mode: 'strict-local', tools: agentVisibleToolNames, attachment
 ## 自测
 
 ```powershell
-cd D:\dsh-plugins\research-core
+cd research-core
 node --test "tests/*.test.mjs"
 ```
 
