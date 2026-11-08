@@ -2,6 +2,7 @@
   "name": "@local/research-core",
   "version": "1.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "description": "本地研究核心：研究身份与绑定、统一数据访问层（事务/代次/锁/恢复/备份）与隐私边界。不提供独立界面。",
   "exports": {
