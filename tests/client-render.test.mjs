@@ -11,7 +11,9 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
+import { fileURLToPath } from 'node:url'
 import { loadPlugin, makeHost, request, pageHeaders } from './harness.mjs'
+const PLUGIN_ROOT = fileURLToPath(new URL('../../', import.meta.url))
 
 function makeReactShim() {
   const frames = []
@@ -70,7 +72,7 @@ test('study-ops 面板可以用真实数据渲染（空白页的回归测试）'
     plugins: {},
   }, null, 2))
   const host = makeHost({ workspaces: [], sessions: {}, cwd: project })
-  const plugin = await loadPlugin('D:/dsh-plugins/study-ops')
+  const plugin = await loadPlugin(PLUGIN_ROOT + 'study-ops')
   plugin.apply(host.ctx, { studyPath: '' })
   const handler = host.routes.get('/api/study-ops')
   const connected = await request(handler, {
@@ -86,7 +88,7 @@ test('study-ops 面板可以用真实数据渲染（空白页的回归测试）'
   const snap = status.json.data
   const core = projection.json.data
 
-  const code = readFileSync('D:/dsh-plugins/study-ops/client.js', 'utf8')
+  const code = readFileSync(PLUGIN_ROOT + 'study-ops/client.js', 'utf8')
   const shim = makeReactShim()
   const registrations = new Map()
   const styleStub = { set textContent(value) {}, remove() {}, appendChild() {} }
@@ -117,7 +119,7 @@ test('study-ops 面板可以用真实数据渲染（空白页的回归测试）'
 })
 
 test('面板在 core 尚未加载 / 核心为空 / 核心报错时都能安全渲染', () => {
-  const code = readFileSync('D:/dsh-plugins/study-ops/client.js', 'utf8')
+  const code = readFileSync(PLUGIN_ROOT + 'study-ops/client.js', 'utf8')
   const shim = makeReactShim()
   const registrations = new Map()
   const styleStub = { set textContent(value) {}, remove() {}, appendChild() {} }

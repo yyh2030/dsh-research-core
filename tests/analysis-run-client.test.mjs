@@ -6,6 +6,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import vm from 'node:vm'
+import path from 'node:path'
 
 function shim() {
   const frames = []
@@ -54,7 +55,7 @@ function shim() {
 }
 
 function loadClient() {
-  const source = readFileSync('D:/dsh-plugins/analysis-run/client.js', 'utf8')
+  const source = readFileSync(path.resolve(import.meta.dirname, '../../analysis-run/client.js'), 'utf8')
   let spec
   const sandbox = {
     window: { __ModuleLoader__: { load: value => { spec = value } }, crypto: { getRandomValues: () => {} }, addEventListener() {}, removeEventListener() {}, matchMedia: () => ({ matches: false, addEventListener() {} }) },
@@ -72,12 +73,12 @@ function loadClient() {
 }
 
 const status = {
-  study: { id: 'local-private-research', name: '本机私有研究', dataRoot: 'D:/yyh-lab', revision: 'abc' },
+  study: { id: 'demo-study', name: '演示研究', dataRoot: './data', revision: 'abc' },
   mode: 'generic', binding: null, busy: null, pendingChanges: false, planRevision: '1', exclusionsRevision: '1',
   modules: [{ id: 'descriptives', label: '描述统计' }, { id: 'regression', label: '组间回归 / ANCOVA' }],
-  runs: [], exclusions: [], backends: {}, python: { configured: true }, paths: { outputDir: 'D:/yyh-lab/analysis' },
-  source: { columns: ['subjectid', 'AUC_T2', 'AUC_T0', 'salience', 'intervention'] },
-  plan: { dataPath: 'D:/yyh-lab/analysis/merged/dataset.csv', idColumn: 'subjectid', outcome: 'AUC_T2', layout: 'wide', groupColumns: ['salience'], covariates: ['AUC_T0'], analyses: ['descriptives', 'regression'] },
+  runs: [], exclusions: [], backends: {}, python: { configured: true }, paths: { outputDir: './data/analysis' },
+  source: { columns: ['subjectid', 'outcome', 'baseline', 'group', 'condition'] },
+  plan: { dataPath: './data/merged/dataset.csv', idColumn: 'subjectid', outcome: 'outcome', layout: 'wide', groupColumns: ['group'], covariates: ['baseline'], analyses: ['descriptives', 'regression'] },
 }
 
 test('分析直通：向导编辑态与结果态都能渲染', () => {
