@@ -10,11 +10,11 @@
 
 | 包 | 版本 | 一句话 | 仓库 |
 |---|---|---|---|
-| `@local/research-core` | 1.1.0 | 共享核心:身份、数据、流程、结果、图表 | [dsh-research-core](https://github.com/yyh33028-netizen/dsh-research-core) |
-| `@local/study-ops` | 0.3.0 | 实验运行台:进度矩阵、异常、预约与随访 | [dsh-study-ops](https://github.com/yyh33028-netizen/dsh-study-ops) |
-| `@local/scale-desk` | 0.2.0 | 量表计分台:定义、录入、计分与校验 | [dsh-scale-desk](https://github.com/yyh33028-netizen/dsh-scale-desk) |
-| `@local/demographic-coder` | 1.2.0 | 人口学变量录入:导入问卷、编码、导出 | [dsh-demographic-coder](https://github.com/yyh33028-netizen/dsh-demographic-coder) |
-| `@local/analysis-run` | 0.2.0 | 分析直通:方案向导、分析模块、可复现快照 | [dsh-analysis-run](https://github.com/yyh33028-netizen/dsh-analysis-run) |
+| `@local/research-core` | 1.1.0 | 共享核心:身份、数据、流程、结果、图表 | [dsh-research-core](https://github.com/yyh2030/dsh-research-core) |
+| `@local/study-ops` | 0.3.0 | 实验运行台:进度矩阵、异常、预约与随访 | [dsh-study-ops](https://github.com/yyh2030/dsh-study-ops) |
+| `@local/scale-desk` | 0.2.0 | 量表计分台:定义、录入、计分与校验 | [dsh-scale-desk](https://github.com/yyh2030/dsh-scale-desk) |
+| `@local/demographic-coder` | 1.2.0 | 人口学变量录入:导入问卷、编码、导出 | [dsh-demographic-coder](https://github.com/yyh2030/dsh-demographic-coder) |
+| `@local/analysis-run` | 0.2.0 | 分析直通:方案向导、分析模块、可复现快照 | [dsh-analysis-run](https://github.com/yyh2030/dsh-analysis-run) |
 
 数据流向大致是:人口学/量表插件把数据写进核心的数据集,运行台读核心投影看进度与异常,分析直通从已提交的代次里汇合出一张分析表。四个业务插件都通过相对路径 `../research-core/…` 引用本仓库,所以五个仓库必须放在同一层目录里。
 
@@ -94,11 +94,11 @@
 五个仓库是私有仓库,需要先有访问权限。因为业务插件用相对路径引用核心,它们必须在同一层目录:
 
 ```powershell
-git clone https://github.com/yyh33028-netizen/dsh-research-core.git
-git clone https://github.com/yyh33028-netizen/dsh-study-ops.git
-git clone https://github.com/yyh33028-netizen/dsh-scale-desk.git
-git clone https://github.com/yyh33028-netizen/dsh-demographic-coder.git
-git clone https://github.com/yyh33028-netizen/dsh-analysis-run.git
+git clone https://github.com/yyh2030/dsh-research-core.git
+git clone https://github.com/yyh2030/dsh-study-ops.git
+git clone https://github.com/yyh2030/dsh-scale-desk.git
+git clone https://github.com/yyh2030/dsh-demographic-coder.git
+git clone https://github.com/yyh2030/dsh-analysis-run.git
 ```
 
 在同一个父目录里克隆完成后,把四个业务插件装进 profile:
@@ -113,7 +113,7 @@ dsh plugin --profile <profile> add link:<父目录>\dsh-analysis-run
 也可以直接用 git 形式,但四个插件与核心仍需保持同级目录(它们解析的是 `../research-core/…` 这一相对路径):
 
 ```powershell
-dsh plugin --profile <profile> add git+https://github.com/yyh33028-netizen/dsh-study-ops.git
+dsh plugin --profile <profile> add git+https://github.com/yyh2030/dsh-study-ops.git
 ```
 
 `research-core` 本身不是 profile 依赖:它不注册 Cordis bundle,不进入 profile 的 `bundles` 列表,只需要在磁盘上与四个插件并列存在。装完重启承载 `dsh web` 的进程;客户端面板的改动还需要刷新页面。
