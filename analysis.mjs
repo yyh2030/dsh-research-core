@@ -72,6 +72,10 @@ export function openAnalysis({ data, study, owner = 'analysis-run' }) {
     const result = readDataset(data, 'observations')
     return { observations: (result.value && result.value.observations) || [], meta: result }
   }
+  function scoresDoc() {
+    const result = readDataset(data, 'scores')
+    return { rows: (result.value && result.value.rows) || [], meta: result }
+  }
 
   function defaultVariables(demographics, tasks) {
     const variables = [
@@ -98,9 +102,16 @@ export function openAnalysis({ data, study, owner = 'analysis-run' }) {
     const participantsResult = participantsDoc()
     const demographics = demographicsDoc()
     const observationsResult = observationsDoc()
+    const scoresResult = scoresDoc()
     requireSource(participantsResult.meta, 'participants', { required: true })
     requireSource(demographics.meta, 'demographics', { required: false })
     requireSource(observationsResult.meta, 'observations', { required: false })
+    requireSource(scoresResult.meta, 'scores', { required: false })
+    const scoreByKey = new Map()
+    for (const row of scoresResult.rows) {
+      const key = `${asText(row.participantId)}|${asText(row.scaleId)}|${asText(row.waveId)}|${asText(row.subscaleKey || 'total')}`
+      if (!scoreByKey.has(key.trim())) scoreByKey.set(key.trim(), row)
+    }
     const tasks = Array.isArray(study.tasks) ? study.tasks : []
     const variables = Array.isArray(plan.variables) && plan.variables.length ? plan.variables : defaultVariables(demographics, tasks)
 
@@ -136,6 +147,7 @@ export function openAnalysis({ data, study, owner = 'analysis-run' }) {
 
     const rows = []
     const missing = Object.fromEntries(variables.map(variable => [variable.name, 0]))
+    const missingReason = {}
     let conflicts = 0
     const unfinished = []
     for (const participant of selected) {
@@ -148,6 +160,12 @@ export function openAnalysis({ data, study, owner = 'analysis-run' }) {
           else value = participant[variable.field]
         } else if (variable.type === 'demographics') {
           value = demographicValue(byId.get(id), variable.column)
+        } else if (variable.type === 'score') {
+          const key = `${id}|${asText(variable.scaleId)}|${asText(variable.waveId)}|${asText(variable.subscaleKey || 'total')}`
+          const score = scoreByKey.get(key.trim())
+          if (!score) value = ''
+          else if (score.numericValue === null || score.numericValue === undefined) { value = ''; missingReason[variable.name] = score.reason || score.status || '不可计分' }
+          else value = Number(score.numericValue)
         } else if (variable.type === 'task') {
           const key = `${participant.participantKey}|${variable.visitId}|${variable.taskId}`
           const slot = effectiveBySlot.get(key)
@@ -170,6 +188,7 @@ export function openAnalysis({ data, study, owner = 'analysis-run' }) {
       participants: { revision: participantsResult.meta.revision, contentHash: participantsResult.meta.contentHash, state: participantsResult.meta.state },
       demographics: { revision: demographics.meta.revision, contentHash: demographics.meta.contentHash, state: demographics.meta.state },
       observations: { revision: observationsResult.meta.revision, contentHash: observationsResult.meta.contentHash, state: observationsResult.meta.state },
+      scores: { revision: scoresResult.meta.revision, contentHash: scoresResult.meta.contentHash, state: scoresResult.meta.state },
     }
     const stats = {
       subset,
@@ -179,6 +198,7 @@ export function openAnalysis({ data, study, owner = 'analysis-run' }) {
       conflicts,
       withoutDemographics: unfinished.length,
       missing,
+      missingReason,
     }
     const manifest = {
       schemaVersion: 1,

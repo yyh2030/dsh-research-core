@@ -187,8 +187,10 @@ test('publishFlow 打开时，计分后把量表提交发布为标准 observatio
   const scored = await post2('score', { binding: connected.json.data.binding.token }, 'page-scale0001')
   assert.equal(scored.status, 200, JSON.stringify(scored.json).slice(0, 800))
   assert.ok(scored.json.data.publish, '应返回发布结果')
-  assert.equal(scored.json.data.publish.published, 1, '已登记编号发布')
-  assert.equal(scored.json.data.publish.unregistered, 1, '未登记编号留在待关联区，不静默增加入组')
+  assert.equal(scored.json.data.publish.observations.published, 1, '已登记编号发布')
+  assert.equal(scored.json.data.publish.observations.unregistered, 1, '未登记编号留在待关联区，不静默增加入组')
+  assert.ok(scored.json.data.publish.scores, '分数发布结果应存在')
+  assert.equal(scored.json.data.publish.scores.published, 1, '分数也要发布到核心数据集')
 
   const observations = data.read('observations').value
   assert.equal(observations.observations.length, 1)

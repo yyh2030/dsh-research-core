@@ -4,7 +4,7 @@
 
 The shared core for research plugins written for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`): study identity and binding, a unified data access layer, flow and observations, result rendering and charts. It is a Host-side library with no UI of its own.
 
-Version 1.2.0 · Requires DSH ≥ 0.2.2-rc.1 · MIT license
+Version 1.3.0 · Requires DSH ≥ 0.2.2-rc.1 · MIT license
 
 This repository also serves as the overview of the research plugin suite.
 
