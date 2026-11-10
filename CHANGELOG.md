@@ -3,6 +3,20 @@
 > 规则：每次改动/调整都在本文件追加一条，注明日期、插件、版本、问题 ID、改了什么、验证方式。
 > 修复阶段的详细验收记录在 `reports/research-plugin-remediation-20261108/` 各阶段完成记录里。
 
+## 2026-11-10 · 07 隐私执行与分享边界（P01/P02 接入，P03/P04 边界）
+
+- **research-core 1.4.0（本轮未升版本号）**（新增 `privacy-projection.mjs`；`results.mjs`；`package.json` 导出）
+  - P01：新增 `agentProjection(kind,payload,mode,options)`。strict-local 对 analysis_status/analysis_results/analysis_run/analysis_export/scale_score/材料摘要只返回状态、计数、opaque artifactId（`art-<sha16>`）和 blocked 原因；summary-cloud 按顶层字段白名单过滤，未知字段或超过 32 KiB 的载荷整体返回 `policy_blocked`；`local` 只授权本机界面，Agent 仍走最小化。模式只从 `ctx.get('privacy')` 服务、研究 `plugins.<plugin>.privacyMode` 或插件配置 `privacyMode` 读取，缺省 strict-local，工具参数不能放宽。
+  - P02：新增 `shareProjection(results,{meta,artifacts,allowedColumns})`：study 仅保留 id/name/version（path/dataRoot/config 去掉）；显示名含路径/邮箱/URL/控制字符时整段隐藏；表按列 schema、声明类型与角色过滤，participantId/姓名/电话/邮箱/地址/备注/自由文本与未知列默认不保留，`group` 等分类列和数值列保留（不按“值像数字”误判）；图注/正文/警告/节点错误同策略，含路径或联系信息的自由文本整段隐藏；manifest 只保留相对路径；`notes` 明示“自由文本/图片元数据不能仅靠规则保证匿名”。
+  - 路径与错误：`scrubText` 覆盖 `C:\`、`\\server\share`、`\\?\`、`/home`、`/Users`、`/tmp`、`~/`、URL/邮箱/证件/手机号/文件名；`sanitizeError` 去路径与逐人编号，丢弃 details 与异常栈。
+  - 结果对象：`buildResults` 保留列 `role`；analysis-run `results()` 透传 meta 表的 `types/analysisSet/nodeId`，使分享过滤按 schema 而不是按值推断。
+- **analysis-run 0.5.0（本轮未升版本号）**（`index.js`）：analysis_results/analysis_status/analysis_run/analysis_export 工具返回全部经过 `agentProjection`；exportRun 用 `shareProjection` 生成 report.html、results.json、tables.docx/tables.xlsx 与 manifest（标题和表值同策略，manifest 相对路径）；图表 label/subtitle 先 `scrubText`；路由错误改用 `sanitizeError`。
+- **scale-desk 0.3.0（本轮未升版本号）**（`index.js`）：`scale_score` 只把计数/汇总（summary-cloud 含量表名与波次人数）交给 `agentProjection`，逐人分数、题目原始值与编号不出工具；工具参数不能改 privacyMode；路由错误脱敏。
+- **study-ops 0.3.1（本轮未升版本号）**（`index.js`）：`materials_scan`、`prep_readiness`、`materials_decisions`(list) 文本摘要经 `agentProjection` 投影（材料目录/文件路径、逐人编号、联系信息去除）；路由错误脱敏。`materials_decisions` set 的“刚写入什么”确认仍回显 label，未改 06 材料解析/草案逻辑。
+- 测试：新增 `tests/remediation-07.test.mjs` 10 例：P01-A（analysis_results/analysis_status、scale_score、materials 摘要的真实工具路径）、P01-B（summary-cloud 白名单/未知字段/超大载荷 + 真实工具）、P02-A（研究名/列名/表值/图注/错误 + 真实导出 HTML/JSON/manifest）、P02-B（ID001 与组 A/B 保留、敏感列过滤）、P03-A（unenforceable 且不伪造已阻止）、P03-B/P04 边界、策略读取与错误投影。`cd D:\dsh-plugins\research-core; node --test "tests/*.test.mjs"` → **193 tests / 193 pass / 0 fail**（基线 183 + 新增 10，未删改旧断言）。
+- P03/P04 边界：strict-local 只保证插件工具返回最小化；当前通用会话存在 read/pwsh/附件/浏览器/MCP 旁路时返回 `enforceability.unenforceable=true`，没有工具清单时返回 `'unknown'`，不宣称“已阻止”。P04-A 需要宿主侧捕获真实模型请求/通知载荷，P03-B 需要断网本地模型/模板全链路，本轮没有伪造这两项；测试注释已写明。自由文本名称、图片元数据、自定义脚本表格仍可能需要人工审阅。
+- 范围说明：未改 06 材料解析/绑定逻辑；未抓真实数据/凭证；未 git commit/push。
+
 ## 2026-11-10 · 06 页面工作区/标签绑定（U01/U02，页面身份侧）
 
 - **research-core 1.4.0**（`client-identity.mjs`、`host.mjs`、`index.mjs`）

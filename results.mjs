@@ -183,7 +183,8 @@ export function buildResults({ run, meta, tables = [], labels = LABELS }) {
       columns: (table.columns || []).map(column => {
         const key = typeof column === 'string' ? column : column.key
         const label = typeof column === 'string' ? labelFor(key, labels) : (column.title || labelFor(key, labels))
-        return { key, ...label }
+        // 07：列角色随结果对象保留，分享投影按 schema 过滤而不是按值推断。
+        return { key, ...label, ...(typeof column === 'object' && column.role ? { role: String(column.role) } : {}) }
       }),
       rows: (table.rows || []).map(row => ({ ...row })),
       notes: table.notes || [],
