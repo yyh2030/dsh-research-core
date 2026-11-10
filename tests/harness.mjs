@@ -49,7 +49,7 @@ export function makeHost({ workspaces = [], sessions = {}, effectiveCwd = {}, cw
   return { ctx, routes, tools, services, disposers }
 }
 
-export async function request(handler, { method = 'GET', path: routePath = '/', headers = {}, body } = {}) {
+export async function request(handler, { method = 'GET', path: routePath = '/', headers = {}, body, hostContext } = {}) {
   const listeners = {}
   const queue = []
   let ended = false
@@ -73,6 +73,8 @@ export async function request(handler, { method = 'GET', path: routePath = '/', 
     setHeader(name, value) { this.headers[String(name).toLowerCase()] = value },
     end(text) { this.body = text; this.done = true },
   }
+  // 宿主注入的页面上下文：只有测试/宿主能放到 req 上，客户端头/体不能冒充。
+  if (hostContext !== undefined) req.hostContext = hostContext
   const settled = handler(req, res)
   if (body !== undefined) {
     const chunk = Buffer.from(JSON.stringify(body), 'utf8')

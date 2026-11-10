@@ -3,6 +3,19 @@
 > 规则：每次改动/调整都在本文件追加一条，注明日期、插件、版本、问题 ID、改了什么、验证方式。
 > 修复阶段的详细验收记录在 `reports/research-plugin-remediation-20261108/` 各阶段完成记录里。
 
+## 2026-11-10 · 06 页面工作区/标签绑定（U01/U02，页面身份侧）
+
+- **research-core 1.4.0**（`client-identity.mjs`、`host.mjs`、`index.mjs`）
+  - U01-A：新增共享 `client-identity.mjs`（浏览器可用、无 Node 依赖），四个 client bundle 由 `research-core/scripts/sync-client-identity.mjs` 嵌入同一实现；pageId 首次生成立即写入 sessionStorage 共享键 `dsh:research:page:v3` 与插件前缀键 `dsh:research:page:v3:plugin:<plugin>`，同标签四插件共用一个 pageId，不同标签不串；刷新读取已有 pageId 保持不变。
+  - U01-B：没有 sessionStorage（隐私模式/禁用/为空）时使用本标签 window 上的进程内唯一 ID，不再共用 localStorage 的 `default` 常量；用 BroadcastChannel + 标签指纹握手检测克隆标签复制 sessionStorage，克隆标签改生成新身份并写回自己的存储，原标签不变。
+  - U02-A：页面请求同时带 pageId、workspaceId（来自 `uiWorkspace` 当前会话所属工作区）与本地绑定代次；`host.mjs` 的 `pageActor` 只信宿主注入的 workspace/session，客户端 workspace 必须命中宿主工作区清单，页面自报 sessionId 直接拒绝，声明与注入不一致返回 `workspace_mismatch`；核心令牌增加工作区指纹，同一页面换工作区即使研究没变也推进 `bindingRevision`，旧令牌写入被 409 拒绝。
+  - U02-A 客户端：每次请求 capture 页面/工作区/绑定代次，响应回来核对 pageId、workspace、bindingRevision、studyId、instanceId，晚到旧响应抛 `stale_response` 且不更新 activeBinding；同标签切换工作区清空旧令牌。
+  - 草稿键：study-ops 焦点提示改为 `dsh:research:focus:v2:<instanceId>:<dataset>`；analysis-run 方案草稿改为 `analysis-plan:v2:<instanceId>:<studyId>:<dataPath>`；demographic-coder 数据集草稿改为 `dc:dataset:v3:<instanceId>:<studyId>:<dataset>`，同 studyId 的不同实例/数据集不再交叉恢复。
+  - 保留“页面缺令牌则拒绝”（`binding_required` 409）与旧页面/会话绑定行为。
+- **study-ops 0.3.1 / scale-desk 0.3.0 / demographic-coder 1.2.0 / analysis-run 0.5.0**（`client.js` 浏览器半）：统一改用共享身份模块；请求头带 `x-dsh-workspace`，请求体带 workspaceId/bindingRevision；连接/保存/重连走 `identity.newPage()`；scale-desk 只读取当前实例+数据集对应的焦点提示键。
+- 测试：新增 `tests/remediation-06-binding.test.mjs` 6 例——两标签两工作区四插件 pageId 一致且不串、克隆/无 storage/空 storage 唯一身份、四插件切工作区后旧响应按 workspace/study/instance 拒绝、宿主旧 A 令牌写 B 被拒且同研究换工作区推进版本、草稿键含 instanceId+数据集、四份 client 预置段与共享模块同源；测试真实加载四个 `client.js` 并用真实 study-ops 路由 + 研究核心。`cd D:\dsh-plugins\research-core; node --test "tests/*.test.mjs"` → **183 tests / 183 pass / 0 fail**（基线 177 + 新增 6，未删改旧断言）。
+- 范围说明：本轮只做页面身份与绑定（U01/U02）；未改 07 隐私边界，未改材料侧扫描/草案逻辑，未写真实研究数据。
+
 ## 2026-11-10 · 06 材料扫描与可审阅草案（材料侧）
 
 - **research-core 1.4.0**（`materials.mjs`）

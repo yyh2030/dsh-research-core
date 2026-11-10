@@ -11,13 +11,15 @@
  * 这里不做业务判断：读写目标始终是调用身份解析出的那一个研究。
  */
 
-import { researchCore, BindingError } from './index.mjs'
+import { researchCore, BindingError, isInside } from './index.mjs'
 
 export { BindingError }
 
 const HEADER = 'x-dsh-page'
+const WORKSPACE_HEADER = 'x-dsh-workspace'
+const WORKSPACE_PATH_HEADER = 'x-dsh-workspace-path'
 /** 宿主适配层版本：用于确认热重载后加载的是哪一份 host.mjs（依赖模块会被 ESM 缓存）。 */
-export const HOST_VERSION = '2026-11-06-cwd'
+export const HOST_VERSION = '2026-11-10-page-workspace'
 
 export function hostBinding(ctx, options) {
   const plugin = options.plugin
@@ -74,12 +76,118 @@ export function hostBinding(ctx, options) {
     })
   }
 
-  /** 页面身份：浏览器每个标签页一个 pageId；缺失时退化为只读探针身份。 */
+  /** 宿主工作区清单：pageActor 只在这里查工作区，不信任页面自己报的 cwd。 */
+  function hostWorkspaces() {
+    try {
+      const registry = ctx.get && ctx.get('workspaceRegistry')
+      if (!registry || typeof registry.list !== 'function') return []
+      return registry.list().filter(row => row && typeof row.path === 'string' && row.path).map(row => ({ id: row.id || '', path: row.path, title: row.title || '' }))
+    } catch { return [] }
+  }
+
+  /**
+   * 宿主注入的页面上下文。只有宿主挂在 req 上的对象才算数；
+   * 请求头/请求体里的 sessionId/workspace 是客户端可伪造的，不能当作认证依据。
+   */
+  function hostPageContext(req) {
+    if (!req || typeof req !== 'object') return null
+    const raw = req.hostContext || req.dshPageContext || req.dshContext
+    const workspace = req.workspace && typeof req.workspace === 'object' ? req.workspace : null
+    const session = req.session && typeof req.session === 'object' ? req.session : null
+    const source = raw && typeof raw === 'object' ? raw : (workspace ? {
+      workspaceId: workspace.workspaceId || workspace.id,
+      workspacePath: workspace.workspacePath || workspace.path,
+      sessionId: session && (session.sessionId || session.id),
+      cwd: (session && session.cwd) || workspace.cwd,
+    } : (session ? {
+      sessionId: session.sessionId || session.id,
+      cwd: session.cwd,
+    } : null))
+    if (!source || typeof source !== 'object') return null
+    return {
+      workspaceId: String(source.workspaceId || source.id || '').trim(),
+      workspacePath: typeof source.workspacePath === 'string' ? source.workspacePath : (typeof source.path === 'string' ? source.path : ''),
+      sessionId: String(source.sessionId || '').trim(),
+      cwd: typeof source.cwd === 'string' ? source.cwd : '',
+    }
+  }
+
+  function workspaceMismatch(message, details) {
+    return new BindingError('workspace_mismatch', message, details)
+  }
+
+  /**
+   * 页面身份：浏览器每个标签页一个 pageId；workspace/cwd 由宿主校验后注入。
+   * - 客户端只能报 workspaceId/cwd 候选值，必须能在宿主工作区清单里找到；
+   * - 页面请求里自带的 sessionId 一律拒绝，页面不能冒充会话；
+   * - 宿主注入的上下文优先，客户端声明与注入不一致时直接拒绝。
+   */
   function pageActor(input = {}) {
-    const header = input.req && input.req.headers ? input.req.headers[HEADER] : ''
+    const req = input.req || {}
+    const header = req.headers ? req.headers[HEADER] : ''
     const pageId = String(input.pageId || header || '').trim()
-    if (pageId) return { kind: 'page', pageId, cwd: input.cwd || localCwd() }
-    return { kind: 'probe', label: plugin, cwd: localCwd() }
+    if (!pageId) return { kind: 'probe', label: plugin, cwd: localCwd() }
+
+    if (input.sessionId || (req.headers && req.headers['x-dsh-session'] && !hostPageContext(req))) {
+      throw new BindingError('actor', '页面请求不能自行声明会话身份，请由宿主注入页面所属会话')
+    }
+
+    const injected = hostPageContext(req)
+    const workspaces = hostWorkspaces()
+    const suppliedWorkspaceId = String(input.workspaceId || (req.headers ? req.headers[WORKSPACE_HEADER] : '') || '').trim()
+    const suppliedWorkspacePath = String(input.workspacePath || (req.headers ? req.headers[WORKSPACE_PATH_HEADER] : '') || '').trim()
+    let workspaceId = suppliedWorkspaceId || (injected && injected.workspaceId) || ''
+    let workspacePath = suppliedWorkspacePath || (injected && injected.workspacePath) || ''
+    let cwd = typeof input.cwd === 'string' ? input.cwd : (injected && injected.cwd) || ''
+
+    // 客户端声明与宿主注入不一致：拒绝，不能靠页面自报切到别的工作区。
+    if (injected && injected.workspaceId && suppliedWorkspaceId && suppliedWorkspaceId !== injected.workspaceId) {
+      throw workspaceMismatch('页面工作区与宿主注入的工作区不一致', { workspaceId: injected.workspaceId, supplied: suppliedWorkspaceId })
+    }
+    if (injected && injected.workspacePath && suppliedWorkspacePath && suppliedWorkspacePath !== injected.workspacePath && !isInside(injected.workspacePath, suppliedWorkspacePath) && !isInside(suppliedWorkspacePath, injected.workspacePath)) {
+      throw workspaceMismatch('页面工作区路径与宿主注入不一致', { workspacePath: injected.workspacePath })
+    }
+    if (injected && injected.workspaceId) workspaceId = injected.workspaceId
+    if (injected && injected.workspacePath) workspacePath = injected.workspacePath
+    if (injected && injected.cwd) cwd = injected.cwd
+
+    let workspace = null
+    if (workspaceId) workspace = workspaces.find(row => row.id === workspaceId) || null
+    if (!workspace && workspacePath) workspace = workspaces.find(row => isInside(row.path, workspacePath) || isInside(workspacePath, row.path)) || null
+    // 宿主注入的上下文本身就是可信来源；工作区清单暂时读不到时仍以注入值为准。
+    if (!workspace && injected && injected.workspaceId && (!workspaceId || workspaceId === injected.workspaceId)) {
+      workspace = { id: injected.workspaceId, path: injected.workspacePath || injected.cwd || '' }
+    }
+    if (!workspace && cwd) {
+      // 客户端自报的 cwd 只有落在已登记工作区里才被采信；宿主注入的 cwd 本身可信。
+      workspace = workspaces.find(row => isInside(row.path, cwd)) || null
+      if (!workspace && injected) workspace = { id: injected.workspaceId || '', path: cwd }
+      if (!workspace) throw workspaceMismatch('页面工作区不在宿主已登记的工作区列表中', { cwd })
+    }
+    if (workspaceId && !workspace) throw workspaceMismatch('页面工作区不在宿主已登记的工作区列表中', { workspaceId })
+    if (workspace && cwd && !isInside(workspace.path, cwd)) {
+      throw workspaceMismatch('页面 cwd 与工作区不一致', { workspaceId: workspace.id, cwd })
+    }
+    if (workspace && workspaceId && workspace.id && workspace.id !== workspaceId) {
+      throw workspaceMismatch('页面工作区身份与 cwd 指向的工作区不一致', { workspaceId, resolved: workspace.id })
+    }
+
+    if (injected && injected.sessionId) {
+      const sessionCwd = sessionCwd(injected.sessionId)
+      if (workspace && sessionCwd && !isInside(workspace.path, sessionCwd)) {
+        throw workspaceMismatch('宿主会话不属于页面声明的工作区', { sessionId: injected.sessionId, workspaceId: workspace.id })
+      }
+    }
+
+    const resolvedCwd = workspace ? workspace.path : (cwd || localCwd())
+    return {
+      kind: 'page',
+      pageId,
+      cwd: resolvedCwd,
+      workspaceId: workspace ? workspace.id : (workspaceId || ''),
+      workspacePath: workspace ? workspace.path : '',
+      sessionId: injected && injected.sessionId ? injected.sessionId : undefined,
+    }
   }
 
   /** 会话身份：工具调用由宿主保证 exec.agent 是发起该调用的会话。 */
@@ -153,6 +261,7 @@ export function bindingStatus(error) {
   const code = error && error.code
   if (code === 'binding_required') return 409
   if (code === 'binding_conflict') return 409
+  if (code === 'workspace_mismatch') return 409
   if (code === 'study_missing') return 409
   if (code === 'busy') return 409
   if (code === 'actor') return 400

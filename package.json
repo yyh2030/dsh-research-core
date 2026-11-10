@@ -14,7 +14,8 @@
     "./flow": "./flow.mjs",
     "./analysis": "./analysis.mjs",
     "./results": "./results.mjs",
-    "./charts": "./charts.mjs"
+    "./charts": "./charts.mjs",
+    "./client-identity": "./client-identity.mjs"
   },
   "main": "./index.mjs",
   "files": [
@@ -28,10 +29,13 @@
     "analysis.mjs",
     "results.mjs",
     "charts.mjs",
+    "client-identity.mjs",
+    "scripts/sync-client-identity.mjs",
     "README.md"
   ],
   "scripts": {
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "sync:client-identity": "node scripts/sync-client-identity.mjs"
   },
   "dsh": {
     "minVersion": "0.2.2-rc.1"

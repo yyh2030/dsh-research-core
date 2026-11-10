@@ -307,7 +307,14 @@ function createCore(initial) {
     if (actor.kind === 'page') {
       const pageId = String(actor.pageId || '').trim()
       if (!PAGE_ID_RE.test(pageId)) throw new BindingError('actor', '页面身份缺失或格式不正确')
-      return { kind: 'page', key: `page:${pageId}`, pageId, cwd }
+      return {
+        kind: 'page',
+        key: `page:${pageId}`,
+        pageId,
+        cwd,
+        workspaceId: String(actor.workspaceId || '').trim(),
+        workspacePath: String(actor.workspacePath || '').trim(),
+      }
     }
     if (actor.kind === 'agent') {
       const sessionId = String(actor.sessionId || '').trim()
@@ -324,6 +331,8 @@ function createCore(initial) {
   }
 
   const scopeHash = scope => sha(scope.key, 10)
+  /** 令牌里带工作区指纹：同页切到另一工作区后旧令牌不能继续用。 */
+  const workspaceHash = scope => sha(scope.kind === 'page' ? (scope.workspaceId || '') : '', 8)
 
   /* ---------- 工作区与项目配置发现 ---------- */
 
@@ -362,19 +371,31 @@ function createCore(initial) {
       scopeHash(scope),
       String(revision || 0),
       descriptor.configured ? descriptor.studyRevision.slice(0, 16) : 'empty',
+      workspaceHash(scope),
     ].join('.')
   }
 
   function parseToken(token) {
     if (typeof token !== 'string') return null
     const parts = token.split('.')
-    if (parts.length !== 5 || parts[0] !== TOKEN_PREFIX) return null
+    if ((parts.length !== 5 && parts.length !== 6) || parts[0] !== TOKEN_PREFIX) return null
     if (!/^\d+$/.test(parts[3])) return null
-    return { instanceId: parts[1], keyHash: parts[2], bindingRevision: Number(parts[3]), studyRevision: parts[4] }
+    // 5 段是旧格式（无工作区）；按空工作区对待，切过工作区后自然不匹配。
+    return { instanceId: parts[1], keyHash: parts[2], bindingRevision: Number(parts[3]), studyRevision: parts[4], workspaceHash: parts[5] || sha('', 8) }
+  }
+
+  /** 页面绑定记录带工作区；同页换工作区即使研究没变也要推进版本。 */
+  function effectiveRevision(scope, record) {
+    const base = record ? Number(record.revision) || 0 : 0
+    if (!record || scope.kind !== 'page') return { revision: base, workspaceChanged: false }
+    // 只有页面明确报告了另一个工作区才算切换；旧客户端不报工作区时不能把记录抹掉。
+    const changed = Boolean(scope.workspaceId) && scope.workspaceId !== (record.workspaceId || '')
+    return { revision: base + (changed ? 1 : 0), workspaceChanged: changed }
   }
 
   function buildView(scope, descriptor, record) {
-    const revision = record ? Number(record.revision) || 0 : 0
+    const effective = effectiveRevision(scope, record)
+    const revision = effective.revision
     const withInstance = attachInstance(descriptor, { register: false })
     return {
       schemaVersion: 1,
@@ -389,6 +410,9 @@ function createCore(initial) {
       dataRoot: descriptor.dataRoot,
       canonicalRoot: descriptor.canonicalRoot,
       bindingRevision: revision,
+      workspaceChanged: effective.workspaceChanged,
+      workspace: { id: scope.kind === 'page' ? (scope.workspaceId || '') : '', path: scope.kind === 'page' ? (scope.workspacePath || '') : '' },
+      workspaceId: scope.kind === 'page' ? (scope.workspaceId || '') : '',
       scope: { kind: scope.kind, keyHash: scopeHash(scope) },
       token: tokenFor(scope, withInstance, revision),
       study: {
@@ -449,7 +473,7 @@ function createCore(initial) {
     const record = bindingRecord(scope.key)
     if (record) return resolveFromRecord(scope, record)
 
-    if (scope.cwd && (scope.kind === 'agent' || scope.kind === 'probe')) {
+    if (scope.cwd && (scope.kind === 'agent' || scope.kind === 'probe' || scope.kind === 'page')) {
       const workspace = workspaceFor(scope.cwd)
       if (workspace) {
         const workspaceRecord = bindingRecord(`workspace:${pathKey(workspace.path)}`)
@@ -481,7 +505,8 @@ function createCore(initial) {
   function persistRecord(scope, view, source) {
     const bindings = loadBindings()
     const previous = bindings.entries[scope.key] || null
-    const sameTarget = previous && previous.studyPath === view.studyPath && previous.instanceId === view.instanceId
+    const sameWorkspace = !scope.workspaceId || (previous && previous.workspaceId || '') === scope.workspaceId
+    const sameTarget = previous && previous.studyPath === view.studyPath && previous.instanceId === view.instanceId && sameWorkspace
     const revision = previous ? (sameTarget ? Number(previous.revision) || 0 : (Number(previous.revision) || 0) + 1) : 1
     const record = {
       instanceId: view.instanceId,
@@ -489,6 +514,8 @@ function createCore(initial) {
       studyId: view.studyId,
       studyRevision: view.studyRevision,
       dataRoot: view.dataRoot,
+      workspaceId: scope.workspaceId || (previous && previous.workspaceId) || '',
+      workspacePath: scope.workspacePath || (previous && previous.workspacePath) || '',
       cwd: scope.cwd || null,
       source,
       revision,
@@ -603,6 +630,7 @@ function createCore(initial) {
       const parsed = parseToken(token)
       if (!parsed) throw conflict('研究绑定令牌无法识别，请刷新页面后重试')
       if (parsed.keyHash !== scopeHash(scope)) throw conflict('研究绑定令牌属于其他页面或会话')
+      if (parsed.workspaceHash !== workspaceHash(scope)) throw conflict('研究绑定属于其他工作区，请重新读取后再写入', { current: { workspaceId: scope.workspaceId || '', studyId: before.studyId } })
       if (parsed.instanceId !== before.instanceId) throw conflict('当前页面已绑定到其他研究实例，请重新加载', { current: { instanceId: before.instanceId, studyId: before.studyId } })
       if (parsed.bindingRevision !== before.bindingRevision) throw conflict('研究绑定已切换，请重新加载后再写入', { current: { bindingRevision: before.bindingRevision, studyId: before.studyId } })
       if (parsed.studyRevision !== (before.configured ? before.studyRevision.slice(0, 16) : 'empty')) throw conflict('研究定义已在外部修改，请重新连接后再写入')
@@ -620,6 +648,14 @@ function createCore(initial) {
     }
     if (supplied.instanceId && before.instanceId && supplied.instanceId !== before.instanceId) {
       throw conflict('请求携带的实例身份与当前绑定不一致')
+    }
+
+    // 同页切换工作区且研究没变：首次用新令牌写入时把新工作区落库，旧令牌从此失效。
+    if (before.workspaceChanged && before.configured) {
+      const record = persistRecord(scope, before, before.source)
+      const descriptor = describeStudy({ studyPath: before.studyPath })
+      const withInstance = attachInstance(descriptor, { register: true })
+      return { ...buildView(scope, withInstance, record), state: 'bound' }
     }
 
     if (before.state === 'candidate' || before.state === 'empty' || before.state === 'missing') {
