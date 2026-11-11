@@ -93,3 +93,30 @@ ode --check + 全套 168/168。
   - `index.js` 改为注入 `createScheduler`，run 前 LOCKS/WRITES guard 与旧 `startAuto()` 接口保留，`autoTick` 动作与 status 的 autoError/autoTicks 不变；`runs(cfg, study)` 显式接收捕获的 context。
   - 新增测试 `research-core/tests/remediation-05-scheduler.test.mjs` 4 例，只测 scheduler 模块并用假时钟：A03-A（同 dataset 改 plan 触发一次、plan 不变不触发）、A03-B（失败暂停、plan 变后恢复）、A04-A（dispose 后推进假时钟不运行且无新 timer、新实例才工作）、A05-A（A 排队后 current 切 B，回调仍用 A 的 cfg.outputDir/context）。
   - 验证：`node --test "tests/*.test.mjs"` → 172 通过 / 0 失败（原 168 + 新增 4）；`node --check analysis-run/index.js`、`node --check analysis-run/scheduler.mjs` 通过。
+
+## 2026-11-11 · 09 独立安装（B01）
+
+- 四个业务插件改为 @local/research-core 包名导入（exports 子路径），package.json 声明 file:../research-core；开发/测试用 D:\dsh-plugins\node_modules\@local\research-core junction。
+- 新增 tests/remediation-09.test.mjs：干净临时目录 + 包名依赖真实 import 两个入口。
+- analysis-run 导出常量同步 0.5.0；npm pack dry-run 27 files/48.6MB，含 vendor/wheels。
+- 验证：remediation-09 通过；全量 194/194。
+- 未完成：scale-desk 旧测试 19/28 失败、GUI 验收、迁移演练、跨平台 wheel。
+
+## 2026-11-11 · 09/T01 scale-desk 旧测试夹具升级
+
+- **scale-desk 0.3.0（仅测试/夹具）**：新增 `tests/support/host.mjs`（临时研究 store、workspaceRegistry/sessions/workingDirectory 宿主入口、每页随机 pageId + `studyConnect` 令牌）；`tests/batch1.test.mjs`、`tests/study.test.mjs`、`tests/smoke.mjs` 改为临时 `study.json`（含 tasks/visits/plugins，dataRoot 指回原临时 lab）+ 真实 Host 路由 + `x-dsh-page`/`x-dsh-workspace` 头与绑定令牌。未删测试、未弱化断言；只在旧契约处更新期望并写明原因：Excel 式 `12345.0` 按 `normalizeId` 归一为 `12345`；07 严格本地投影不再返回逐人 duplicate 原因，改断言 `status missing`/`records 0`；`resolveImport` 会自动换编号列重试，旧“后段 pattern 拒绝”不可达，改用同样写前抛出的未知波次验证导入原子性；A-B-A 旧页面拒绝改用旧 binding token，并以 store 不可写模拟连接失败验证研究定义回滚。
+- 根因分类：19 个失败全部是夹具身份过时（同一类，两个来源）——旧夹具 apply 只给 `{projectRoot,labDir}`，没有 study.json、没有 pageId/令牌，写请求被识别为 probe 并报 `study_missing`；同时进程级默认 store 残留“probe → 已删除临时研究”的记录，使失败在多次运行间复现。`tests/study.test.mjs` 里旧 `researchSelection` peer-busy 机制已被 06 绑定层取代，按当前契约用核心持久化失败验证回滚。
+- 验证：`cd D:\dsh-plugins\scale-desk; node --test tests/*.test.mjs` → **28 tests / 28 pass / 0 fail**；`node tests/smoke.mjs` → 通过；`cd D:\dsh-plugins\research-core; node --test "tests/*.test.mjs"` → **194 tests / 194 pass / 0 fail**（未改 research-core 共享代码；此前两次全量分别因 PDF 渲染与 autoRun 去抖在并发负载下超时，单文件复跑与第三次全量均通过）。
+- 范围：未写真实研究数据，未 git commit/push。
+
+## 2026-11-11 · 09 私有副本迁移与回退演练（M09）
+
+- **research-core 1.4.0（仅新增测试，未改生产代码）**（新增 `tests/remediation-09-migration.test.mjs`）
+  - M09-A：mkdtemp 合成研究写入 2 名参与者、人口学、2 条观察与 2 条分数；记录四数据集 revision/contentHash/generationId 与来源健康（ok），并记分析表基线（2 行、hash）。
+  - M09-B：`backup` 到临时目录，核对 backup.json 的数据集清单与 revision/contentHash、逐文件 sha256/bytes、可由清单重算的 digest，以及 `restorePreflight.ok`。
+  - M09-C：数据根整体复制到另一临时目录、研究定义复制到影子根；同 instanceId 从新路径读取 revision/contentHash/health 与分析表 hash 均与备份前一致；原数据根逐文件 hash 不变。副本继承实例身份，换新 instanceId 打开返回 `wrong_instance`（<2s）。
+  - M09-D：影子副本新增 P-003、一条观察与一条分数，只出现在影子；原根人数/revision/hash 不变。回退前把切换后数据单独 backup；旧备份 restore 到另一个干净根，恢复 2 人旧数据、健康 ok、新增数据不在其中；再用切换后备份 restore，P-003/观察/分数可重放；restore 不删除新增代次。
+  - M09-E：`restorePreflight` 对错误实例、schemaVersion=2、不同 studyId、缺 backup.json、篡改数据文件（hash/digest）均返回 ok=false 且 <2s；`restore` 对预检失败抛 `source_invalid`（committed=false），不写当前数据根。
+  - M09-F：记录同根就地 restore 的真实限制：只写 current.json，不更新 `transactions/study-pointer.json`；`head()` 取指针与 current 中较大的 revision，因此 restore 返回 `restored:true` 后读取仍是指针指向的切换后更高代次，`reconcile()` 会把 current 补回该代次。回退需另根恢复或先停写后换根，当前 API 没有重置提交指针的入口。
+- 验证：`cd D:\dsh-plugins\research-core; node --test "tests/*.test.mjs"` → **200 tests / 200 pass / 0 fail**（基线 194 + 新增 6，未改旧断言）；新文件单跑 6/6。
+- 范围：全部 mkdtemp/os.tmpdir 合成数据，`assertInsideTemp` 拒绝真实研究路径字样；未打开/复制/写入 D:\yyh-lab 或真实 study；未改生产代码；未 git commit/push。
