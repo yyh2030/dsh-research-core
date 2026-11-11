@@ -108,9 +108,14 @@ export function openAnalysis({ data, study, owner = 'analysis-run' }) {
     requireSource(observationsResult.meta, 'observations', { required: false })
     requireSource(scoresResult.meta, 'scores', { required: false })
     const scoreByKey = new Map()
+    const scoreRank = row => (row.numericValue !== null && row.numericValue !== undefined ? 2 : 0)
+      + (row.submissionId && row.selectedSubmissionId && row.submissionId === row.selectedSubmissionId ? 4 : 0)
     for (const row of scoresResult.rows) {
       const key = `${asText(row.participantId)}|${asText(row.scaleId)}|${asText(row.waveId)}|${asText(row.subscaleKey || 'total')}`
-      if (!scoreByKey.has(key.trim())) scoreByKey.set(key.trim(), row)
+      const current = scoreByKey.get(key.trim())
+      // 同一槽可能有多份提交：优先被裁决选中的 submission，其次优先有数值的行；
+      // 不能按文件顺序取第一条，否则被拒行在前时会把有效分数读成缺失。
+      if (!current || scoreRank(row) > scoreRank(current)) scoreByKey.set(key.trim(), row)
     }
     const tasks = Array.isArray(study.tasks) ? study.tasks : []
     const variables = Array.isArray(plan.variables) && plan.variables.length ? plan.variables : defaultVariables(demographics, tasks)

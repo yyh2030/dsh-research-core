@@ -120,3 +120,27 @@ ode --check + 全套 168/168。
   - M09-F：记录同根就地 restore 的真实限制：只写 current.json，不更新 `transactions/study-pointer.json`；`head()` 取指针与 current 中较大的 revision，因此 restore 返回 `restored:true` 后读取仍是指针指向的切换后更高代次，`reconcile()` 会把 current 补回该代次。回退需另根恢复或先停写后换根，当前 API 没有重置提交指针的入口。
 - 验证：`cd D:\dsh-plugins\research-core; node --test "tests/*.test.mjs"` → **200 tests / 200 pass / 0 fail**（基线 194 + 新增 6，未改旧断言）；新文件单跑 6/6。
 - 范围：全部 mkdtemp/os.tmpdir 合成数据，`assertInsideTemp` 拒绝真实研究路径字样；未打开/复制/写入 D:\yyh-lab 或真实 study；未改生产代码；未 git commit/push。
+
+## 2026-11-11 · 09 合成端到端脚本（E2E）
+
+- **research-core 1.4.0（仅新增测试，未改生产代码）**（新增 `tests/remediation-09-e2e.test.mjs`）
+  - E2E-01 材料：临时目录写中文基线/随访、两份互斥计分规则与中文任务；`materials_scan` → `materials_decisions` 确认 2 访视 2 任务 → `study_draft_preview` → `study_draft_save` → `prep_readiness`。断言访视 ID 为 `visit-<sha12>`、保存与重扫预览 ID 不漂移、同名不同来源不合并、`decisions.json` 保留 kind/label/sourcePath/sourceSha256/reason；计分冲突与未知 dryRun 如实阻断准备度。
+  - E2E-02 登记/人口学/入组：先 `participants_manage` 登记 2 人，再用 `flow.demographics.commit` 在同一事务里登记 P-003/P-004 并提交 4 行人口学；核对 participants 只递增一代、demographics revision=1，入组后总男女 2/2，arm=A/B 各 2 人且各 1 男 1 女。
+  - E2E-03 量表两波次：基线 4 行（P-001 重复提交 + 修正、P-002 缺一题、P-003 正常）与随访 3 行；首轮计分 P-001 为 conflict、两行 duplicate/null，缺题按比例得 2.67；核心 `observations.adjudicate` 选中修正 submission 后重计分，scores 只给选中行 4.25，被拒行仍保留 null/duplicate/reason；分析表未裁决时为缺失。
+  - E2E-04 任务 CSV：同内容提交两次幂等（来源 1 个、观察不重复）；同名不同内容成为第 2 来源版本并只新增本次观察；缺日期列的损坏源提交被拒绝，来源与观察均不增加。
+  - E2E-05 source=core 分析：`variables` 含 `type:'score'`（GARDEN baseline/followup）；3 人时 ttest 因 `eligibleSubjects=3 < gate 4` 为 not_run，加 P-004 后 executed；改方案新增 sample、排除 P-002 均产生新 runId/指纹，旧 run 标 stale；脚本同代码复用缓存，改代码生成新 runId 且不复用。
+  - E2E-06 导出读回：真实运行 descriptives+ttest 后 `export`，用 python-docx/openpyxl 读回 tables.docx/tables.xlsx：ttest 表 n=8、meanDiff=-6.50、CI 与运行表一致，XLSX 数值类型与 `0.00` 格式正确，DOCX 两位小数一致；分组估计图存在；本机 input.csv 保留 P-001，而 results.json/manifest/HTML/DOCX/XLSX 均不含逐人编号、绝对路径或外部 URL。
+  - E2E-07 双研究交错：A/B 使用相同编号 P-001…P-003 与相同量表定义，交错 score A→B→A；A 的 P-001=2、B 的 P-001=4，submissionId 各自归属；页面绑定、`study_status`/`flow_projection` 后台读取均不串研究。
+  - E2E-08 锁/崩溃/重启：持锁时另一实例提交在 <2s 内 `dataset_conflict` 且无半成品；坏锁 <2s 返回 `recovery_required` 且不静默删除；修复后可提交；死进程锁被归档到 `transactions/stale` 并继续提交；重新打开数据根后 participants/demographics/tasks revision 与值正确、无待恢复锁。
+  - E2E-09 断网/本地：把 `globalThis.fetch` 换成抛错函数后仍完成本地分析与导出（fetch 调用 0 次）；report.html/results.json/manifest.json 无外部 URL、无逐人编号、无本机路径；Agent `analysis_status` 摘要同样不带路径/编号；静态核对三个业务插件未引入 fetch/node:http(s)。
+  - SKIP-09-9：提醒创建/改期/解除/回执与手机状态属于 08 阶段、需要官方 gateway，按任务说明 skip 并写明原因，不用本地 stub 伪造。
+- **发现的问题（记录，不擅自改语义）**：`research-core/analysis.mjs` 的 `scoreByKey` 对同一 `(participantId, scaleId, waveId, subscaleKey)` 只保留第一条分数行；当重复提交的两行同 key 且被拒行（numericValue=null）在前时，即使核心已裁决选中另一 submission，分析表仍读到缺失。E2E-03 用 `t.diagnostic` 与显式断言记录该现状；E2E-05 用无歧义单一 submission 覆盖 source=core score 变量。修复建议：优先选 `selectedSubmissionId` 对应行或 numericValue 非空行，但本轮未改生产代码。
+- 验证：`cd D:\dsh-plugins\research-core; node --test "tests/*.test.mjs"` → **210 tests / 209 pass / 1 skipped / 0 fail**（基线 200 + 新增 10：9 pass + 1 skip）；新文件单跑同结果。未改旧断言，未删旧测试。
+- 范围/未覆盖：全部 mkdtemp 合成数据，`assertInsideTemp` 拒绝真实研究路径字样；未打开/复制/写入 D:\yyh-lab 或真实 study；未改生产代码；未 git commit/push。未覆盖实际 GUI 视觉/交互验收、真实提醒 gateway/手机端与真实跨进程 kill 崩溃（E2E-08 用坏锁与“同主机同启动实例、进程已退出”的锁记录模拟）。
+
+## 2026-11-11 · 09 E2E 发现并修复分数选择缺陷
+
+- research-core/analysis.mjs：scoreByKey 不再按文件顺序取第一条；同一 (participant, scale, wave, subscale) 优先 selectedSubmissionId 对应行，其次优先有数值行。修复裁决后被拒行在前导致分析表读成缺失的问题。
+- tests/remediation-09-e2e.test.mjs：E2E-03 改为断言裁决后分析层取到 4.25。
+- 验证：全量 210 tests / 209 pass / 1 skipped（skip=08 gateway 提醒）。
+- 提交：research-core 本次推送。
