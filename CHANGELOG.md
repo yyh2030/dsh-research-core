@@ -144,3 +144,38 @@ ode --check + 全套 168/168。
 - tests/remediation-09-e2e.test.mjs：E2E-03 改为断言裁决后分析层取到 4.25。
 - 验证：全量 210 tests / 209 pass / 1 skipped（skip=08 gateway 提醒）。
 - 提交：research-core 本次推送。
+## 2026-11-11 · 09 B02 支持矩阵
+
+- analysis-run README（中/英）增加支持矩阵与统计后端准备说明。
+- 证据：node vendor/install.mjs --check → exit 0；平台限 Windows x64 + CPython 3.12。
+- 未验证：macOS/Linux、py3.13、ARM。
+## 2026-11-11 · 09 V01 证据与人工清单
+
+- live 检查：Host 工具全部可发现；client slot 未见研究插件专用条目；bsk browsers=[]。
+- 新增 reports/.../09-V01-人工验收清单.md（含证据与逐项清单）。
+- 未完成：真实页面视觉/交互验收（需浏览器扩展或人工走查）。
+## 2026-11-11 · 09 V01 浏览器连接与认证边界
+
+- bsk 扩展实测已连接（实例 ccb9e4a1，Chrome 157 / 扩展 0.4.2 / 协议 1.8）；上一轮未连接是我停掉了 daemon。
+- 受控 Chrome 打开 127.0.0.1:55322 被要求认证；DSH 应用窗口自带启动 token，受控 Chrome 没有该 cookie。
+- 未提取 token/凭证；需用户提供完整认证 URL 或人工走查 09-V01-人工验收清单.md。
+- 其余 09 项不受影响（210 tests / 209 pass / 1 skipped）。
+## 2026-11-11 · 09 V01 桌面应用真实验收（部分）
+
+- 用 Windows UIAutomation + 窗口截图在 DSH 桌面应用窗口完成真实验收（浅色、1941x1243）：
+  资料板、量表计分（真实计数 72/72、1607 份）、分析直通（本机私有研究、数据已找到）渲染正常；
+  侧栏四个插件入口齐全。截图存 reports/.../09-V01-证据/。
+- 发现待查：实验运行台显示研究连接·
+## 2026-11-11 · 09 V01 键盘遍历
+
+- Tab 顺序覆盖 资料板/人口学录入/实验运行台/量表计分/分析直通，均有可读名称，无焦点陷阱。
+- 剩余：深色、长表、PDF/Office、分享审阅（需用户授权）。
+## 2026-11-12 · 修复页面写入不携带绑定令牌（P0）
+
+- 根因：06 的共享 client-identity ody() 只发 pageId/workspace/revision，没发 inding 令牌；
+  四个服务端 assertWrite 都从 payload.binding 取 token，导致页面写入永远 binding_required，
+  横幅一直显示绑定已过期，点重新加载研究只 newPage 不重新 studyConnect，也会复发。
+- 修复：ody() 在已记住令牌时发送 inding；重新加载研究改为 newPage → studyConnect(研究路径) → load。
+- 新增 tests/remediation-09-binding-token.test.mjs（2 例：body 带 token、四个 bundle 同源）。
+- 验证：binding/token 测试 8/8；remediation-06-binding 通过。
+- 说明：全量测试在本机并行负载下出现 autoRun/ANA/lock 时序性失败，单跑均通过（见 09-完成记录）。

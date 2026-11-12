@@ -332,6 +332,9 @@ const DSH_RESEARCH_CLIENT_IDENTITY = (function () {
       ensure()
       const result = { pageId, bindingRevision: revision }
       if (workspace && workspace.id) result.workspaceId = workspace.id
+      // 写入令牌必须随请求体发送：连接/读取响应会 remember() 令牌，但只有 body 带上它，
+      // 服务端 assertWrite 才会认为这是当前页面的绑定（否则页面永远 binding_required）。
+      if (binding && binding.token) result.binding = binding.token
       return result
     }
 
