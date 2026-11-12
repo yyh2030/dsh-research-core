@@ -39,5 +39,7 @@ test('U02 四个 client bundle 的 body() 都发送绑定令牌', () => {
   for (const plugin of ['study-ops', 'scale-desk', 'demographic-coder', 'analysis-run']) {
     const source = readFileSync(`D:/dsh-plugins/${plugin}/client.js`, 'utf8')
     assert.match(source, /result\.binding = binding\.token/, `${plugin} 的 body() 缺少 token`)
+    // 曾出现 `binding:ticket.token` 覆盖 body 里的正确令牌（ticket.token 恒为 undefined）。
+    assert.doesNotMatch(source, /binding:\s*ticket\.token/, `${plugin} 不得用 ticket.token 覆盖 binding`)
   }
 })

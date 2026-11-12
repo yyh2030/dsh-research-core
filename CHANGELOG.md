@@ -179,3 +179,10 @@ ode --check + 全套 168/168。
 - 新增 tests/remediation-09-binding-token.test.mjs（2 例：body 带 token、四个 bundle 同源）。
 - 验证：binding/token 测试 8/8；remediation-06-binding 通过。
 - 说明：全量测试在本机并行负载下出现 autoRun/ANA/lock 时序性失败，单跑均通过（见 09-完成记录）。
+## 2026-11-12 · 真正根因：客户端用 ticket.token 覆盖了 binding
+
+- study-ops/scale-desk/demographic-coder/analysis-run 的 call() 在 body 里写
+  inding: ticket.token，而 ticket 只有 {snapshot,headers,body}，	icket.token 恒为 undefined；
+  它把 body() 里正确的 inding 覆盖掉，导致页面写入永远 binding_required。
+- 修复：删除四个 client.js 的 inding:ticket.token 覆盖，信任 ticket.body 的 binding。
+- 回归：remediation-09-binding-token 增加不得用
