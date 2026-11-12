@@ -7,7 +7,17 @@
  */
 
 import path from 'node:path'
+import { mkdtempSync, rmSync } from 'node:fs'
+import os from 'node:os'
 import { pathToFileURL } from 'node:url'
+
+// 测试一律使用隔离的研究存储；否则插件启动/绑定会把临时研究写进用户 profile 的
+// storages/research-core，候选列表越跑越长（历史 bug：渲染冒烟研究/合成长表研究）。
+if (!process.env.DSH_RESEARCH_STORE) {
+  const store = mkdtempSync(path.join(os.tmpdir(), 'rc-harness-store-'))
+  process.env.DSH_RESEARCH_STORE = store
+  process.on('exit', () => { try { rmSync(store, { recursive: true, force: true }) } catch { /* 已清理 */ } })
+}
 
 export async function loadPlugin(dir) {
   const entry = path.join(dir, 'index.js')

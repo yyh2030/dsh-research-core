@@ -292,6 +292,24 @@ function createCore(initial) {
     return null
   }
 
+  /**
+   * 其它插件在“没有页面绑定”时统一回退到同一份旧配置研究。
+   * 只读描述，不注册、不写绑定；没有旧配置时返回 null。
+   */
+  function legacyStudy() {
+    const legacy = legacyDescriptor()
+    if (!legacy) return null
+    const descriptor = legacy.descriptor
+    return {
+      studyPath: descriptor.studyPath || null,
+      projectRoot: legacy.plugin.legacyProjectRoot || null,
+      studyId: descriptor.studyId || null,
+      name: descriptor.name || null,
+      dataRoot: descriptor.dataRoot || null,
+      configured: Boolean(descriptor.configured),
+    }
+  }
+
   /** 工作区清单每次解析前由宿主刷新；不清空已加载的实例与绑定缓存。 */
   function setWorkspaces(list) {
     state.options.workspaces = Array.isArray(list)
@@ -770,6 +788,15 @@ function createCore(initial) {
     for (const [name, hooks] of state.plugins) {
       let current = null
       try { current = typeof hooks.currentIdentity === 'function' ? hooks.currentIdentity() : null } catch { current = null }
+      // 只读能力查询也把插件对齐到当前会话/页面绑定；否则同一启动里没打开过的面板
+      // 会暂时停留在各自缓存的空研究，一致性检查误报不一致。busy 时保持原状并如实报告。
+      if (resolved.configured && typeof hooks.prepareSwitch === 'function') {
+        const wantedForPlugin = `config:${pathKey(resolved.studyPath)}`
+        const currentForPlugin = current ? (current.studyPath ? `config:${pathKey(current.studyPath)}` : `empty:${pathKey(current.dataRoot)}`) : null
+        if (currentForPlugin !== wantedForPlugin) {
+          try { hooks.prepareSwitch(resolved.studyPath).commit(); current = hooks.currentIdentity() } catch { /* 保持原状 */ }
+        }
+      }
       const currentKey = current ? (current.studyPath ? `config:${pathKey(current.studyPath)}` : `empty:${pathKey(current.dataRoot)}`) : null
       const wantedKey = resolved.configured ? `config:${pathKey(resolved.studyPath)}` : `empty:${pathKey(resolved.dataRoot)}`
       plugins.push({
@@ -796,6 +823,7 @@ function createCore(initial) {
     registerPlugin,
     setWorkspaces,
     describeStudy,
+    legacyStudy,
     resolve,
     connect,
     disconnect,

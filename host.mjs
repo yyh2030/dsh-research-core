@@ -251,6 +251,7 @@ export function hostBinding(ctx, options) {
     write,
     connect,
     capabilities,
+    legacyStudy: () => core.legacyStudy(),
     dispatch(scope) { if (unregister) scope.effect(unregister, `${plugin}: research binding`) },
     dispose() { if (unregister) unregister(); unregister = null },
   }

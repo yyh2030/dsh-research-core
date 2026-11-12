@@ -209,3 +209,11 @@ ode --check + 全套 168/168。
 - 120 人合成分析经真实路由导出：correlation 105 行；DOCX 106 行、XLSX 110 行；PDF 6 页。
 - 修复分享包泄漏：privacy 过滤 subjectIds 等逐人集合；新增 P02-C 回归测试（11/11 隐私测试通过）。
 - 证据：reports/.../09-V01-证据/合成-长表导出/。
+## 2026-11-12 · 09 启动一致性回退与测试存储隔离
+
+- 新增 core.legacyStudy()（host 暴露）：无页面/显式路径时，analysis-run/scale-desk/demographic-coder
+  回退到 study-ops 注册的 legacy 研究，不再各自落到 study-<空根hash>。
+- readCapabilities 自愈：能力查询把各插件 prepareSwitch 到当前页面/会话绑定，未打开过的面板不再误报不一致；busy 时保持原状并如实报告。
+- 测试隔离：harness.mjs 默认给每个测试进程 mkdtemp 的 DSH_RESEARCH_STORE，防止测试把临时研究写进用户 store。
+- 清理历史测试污染：instances 193→2、bindings 17→13（备份 *.bak-20261112）。
+- 测试：新增 remediation-09-fallback 2 例；全量 214 tests / 213 pass / 0 fail / 1 skipped。
