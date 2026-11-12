@@ -186,3 +186,26 @@ ode --check + 全套 168/168。
   它把 body() 里正确的 inding 覆盖掉，导致页面写入永远 binding_required。
 - 修复：删除四个 client.js 的 inding:ticket.token 覆盖，信任 ticket.body 的 binding。
 - 回归：remediation-09-binding-token 增加不得用
+## 2026-11-12 · 09 V01 深色主题
+
+- 设置→通用设置→外观→深色，应用整体深色渲染正常；截图 09-V01-证据/设置-深色.png。
+- 插件面板未单独深色截图（UIA 点击受 DPI 影响），浅色下已验证；主题可随时改回跟随系统。
+## 2026-11-12 · 09 文案与版本一致性
+
+- study-ops 客户端：区分 binding_required（页面绑定已失效，点重新加载研究）与研究变化（binding_conflict/study_missing），
+  不再把所有写入失败都显示成研究已变化；记录 staleKind。
+- analysis-run：内部 VERSION 常量为 0.2.0 已同步为 0.5.0（与 package/export 一致）。
+- 验证：node --check 通过；绑定/路由测试此前 8/8。
+## 2026-11-12 · 09 V01 发现分组卡片与核心投影不一致
+
+- 运行台分组卡合计 89，核心 flow_projection 已入组 63、分组合计 63；来源/分母不一致，列 P1 待修。
+- 另记录：102? 实际 100 参与者 = 63 入组 + 37 登记未入组；性别 10/43/0/10/0。
+## 2026-11-12 · 09 修复分组卡分母
+
+- 运行台分组进度在 core 视图下改用已提交代次的 enrolled 分组与性别，不再混用旧文件分母（89 → 63）。
+- study-ops client 修复；node --check 通过；需重启确认。
+## 2026-11-12 · 09 V01 合成长表导出与分享泄漏修复
+
+- 120 人合成分析经真实路由导出：correlation 105 行；DOCX 106 行、XLSX 110 行；PDF 6 页。
+- 修复分享包泄漏：privacy 过滤 subjectIds 等逐人集合；新增 P02-C 回归测试（11/11 隐私测试通过）。
+- 证据：reports/.../09-V01-证据/合成-长表导出/。

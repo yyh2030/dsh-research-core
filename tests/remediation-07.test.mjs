@@ -498,3 +498,17 @@ test('策略读取：privacy 服务优先，缺省 strict-local；错误返回�
   assert.equal(safe.detailsOmitted, true)
   assert.equal(JSON.stringify(safe).includes('C:\\Users'), false)
 })
+
+test('P02-C 分享 meta 不包含逐人 subjectIds', () => {
+  const share = shareProjection(
+    { study: { id: 's1', name: '合成研究' }, tables: [], figures: [], hash: 'h1' },
+    { meta: { status: 'ok', study: { id: 's1', name: '合成研究' }, nodes: {
+      regression: { status: 'executed', reason: '', result: { subjects: 2, subjectIds: ['S-001', 'S-002'], coefficients: [{ term: 'x', estimate: 1.25 }] } },
+    } } },
+  )
+  const text = JSON.stringify(share)
+  assert.doesNotMatch(text, /S-00[12]/, '逐人编号不能进入分享包')
+  assert.equal(share.meta.nodes.regression.result.subjectIds, undefined)
+  assert.equal(share.meta.nodes.regression.result.subjects, 2, '计数仍保留')
+  assert.equal(share.meta.nodes.regression.result.coefficients[0].estimate, 1.25)
+})

@@ -684,7 +684,7 @@ function sanitizeShareValue(value, redactions = [], depth = 0) {
   if (typeof value !== 'object') return String(value)
   const out = {}
   for (const [key, item] of Object.entries(value)) {
-    if (/(?:^|_)(path|paths|dataRoot|config|process|hostname|pid|ids|pairs|raw|rawValues|values|address|email|mail|phone|mobile|tel|name)$/i.test(key)) {
+    if (/(?:^|_)(path|paths|dataRoot|config|process|hostname|pid|ids|subjectIds|excludedIds|participantIds|participantKeys|recordIds|pairs|raw|rawValues|values|address|email|mail|phone|mobile|tel|name)$/i.test(key)) {
       redactions.push({ field: key, reason: '对象字段属于路径/进程/逐人数据，分享包不保留' })
       continue
     }
