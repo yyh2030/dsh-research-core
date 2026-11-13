@@ -22,7 +22,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync
 import os from 'node:os'
 import path from 'node:path'
 
-export const CORE_VERSION = '1.0.0'
+export const CORE_VERSION = '1.1.0'
 export const STORE_SCHEMA_VERSION = 1
 
 const SHARED = Symbol.for('dsh.research.core.v1')
@@ -589,18 +589,19 @@ function createCore(initial) {
     const scope = actorScope(actor)
     let studyPath = options.studyPath ? path.resolve(scope.cwd || process.cwd(), options.studyPath) : null
 
-    if (!studyPath && options.create) {
-      if (!options.studyPath) throw invalid('创建空研究需要给出研究定义文件路径')
-      const target = path.resolve(scope.cwd || process.cwd(), options.studyPath)
-      mkdirSync(path.dirname(target), { recursive: true })
-      const definition = options.definition || minimalDefinition(target, options)
+    // 创建分支必须先于“连接已有研究”：否则带 studyPath 的 create:true 会直接去读一个
+    // 还不存在的文件。已有目标一律冲突，不覆盖、也不误当连接，失败不留半套目录。
+    if (options.create) {
+      if (!studyPath) throw invalid('创建空研究需要给出研究定义文件路径')
+      if (existsSync(studyPath)) throw conflict('该路径已有研究定义，请选择"连接已有研究"或换一个路径')
+      const definition = options.definition || minimalDefinition(studyPath, options)
+      mkdirSync(path.dirname(studyPath), { recursive: true })
       try {
-        writeFileSync(target, JSON.stringify(definition, null, 2) + '\n', { encoding: 'utf8', flag: 'wx' })
+        writeFileSync(studyPath, JSON.stringify(definition, null, 2) + '\n', { encoding: 'utf8', flag: 'wx' })
       } catch (error) {
         if (error.code === 'EEXIST') throw conflict('该路径已有研究定义，请选择"连接已有研究"或换一个路径')
         throw error
       }
-      studyPath = target
     }
     if (!studyPath) throw invalid('连接研究需要提供研究定义路径')
 

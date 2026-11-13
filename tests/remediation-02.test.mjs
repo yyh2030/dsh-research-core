@@ -203,5 +203,5 @@ test('S07 节点分析集：id、n、观测数与列声明一致', () => {
   assert.equal(regression.analysisSet.n, 38)
   assert.equal(regression.analysisSet.id.length, 16)
   assert.deepEqual(regression.analysisSet.columns, ['id', 'y', 'g', 'z'])
-  assert.equal(regression.analysisSet.ruleVersion, 'analysis-engine/2.4.0')
+  assert.equal(regression.analysisSet.ruleVersion, 'analysis-engine/2.5.0')
 })

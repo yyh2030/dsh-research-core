@@ -217,3 +217,18 @@ ode --check + 全套 168/168。
 - 测试隔离：harness.mjs 默认给每个测试进程 mkdtemp 的 DSH_RESEARCH_STORE，防止测试把临时研究写进用户 store。
 - 清理历史测试污染：instances 193→2、bindings 17→13（备份 *.bak-20261112）。
 - 测试：新增 remediation-09-fallback 2 例；全量 214 tests / 213 pass / 0 fail / 1 skipped。
+## 2026-11-13 · 09 重启后最终验证
+
+- 四插件一致绑定 local-private-research；运行台入组 63、分组 12/15/18/18 合计 63，无绑定过期横幅。
+- 证据：reports/.../09-V01-证据/运行台-重启后.png；全量 214/213/0/1。
+## 2026-11-13 · followup 01 继续修复（A1—A7）
+
+- core 1.5.0：connect(create:true) 真正创建、已有冲突不覆盖；restore 同根有已提交数据时
+  unsupported_restore_target；analysis 依据当前裁决校验分数（撤销=adjudication_revoked，
+  改选未重算=score_pending）；flow 裁决版本单调递增。
+- analysis-run 0.5.1 / engine 2.5.0：排除内容进入自动运行指纹；缓存要求完整 artifactHashes
+  并拒绝缺 hash/篡改/越界；list 分支表格补 analysisSet；engine 直调自加载 vendor 统计后端。
+- scale-desk 0.3.1：发布分数冻结 observationId/adjudicationVersion/taskId/visitId。
+- 测试：followup-01 6 例、FIX-02 scheduler 1 例、analysis-auto 真实排除补跑、FIX-07 迁移用例；
+  全量 222 tests / 221 pass / 0 fail / 1 skipped；scale 28/28。
+- 限制：裁决后需手动重新计分；legacy scores 未标记 unverified；创建入口仅 study-ops（02 统一）。

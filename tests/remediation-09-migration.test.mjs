@@ -318,6 +318,7 @@ test('M09-D 切换后新增只进影子副本，旧备份回退后新增不在�
   const backupRoot = mkdtempSync(path.join(os.tmpdir(), 'rc-r09-switch-backup-'))
   const postRoot = mkdtempSync(path.join(os.tmpdir(), 'rc-r09-switch-post-'))
   const rollbackProject = makeProject('rc-r09-rollback-', { studyId: 'remediation-09' })
+  const reimportProject = makeProject('rc-r09-reimport-', { studyId: 'remediation-09' })
   try {
     const { data, flow } = openProject(project, 'inst-A')
     seedStudy(data, flow)
@@ -402,25 +403,27 @@ test('M09-D 切换后新增只进影子副本，旧备份回退后新增不在�
     for (const name of DATASETS) assert.equal(healthStates(rollback)[name], 'ok')
     assert.equal(openAnalysis({ data: rollback, study: rollbackProject.study }).dataset().stats.rows, 2)
 
-    // 新增数据没有丢：从切换后备份重新导入回退根，P-003 及其观察/分数重新出现。
-    const reimport = rollback.restore(postSwitch.folder)
+    // 新增数据没有丢：恢复到另一个干净根导入切换后备份，P-003 及其观察/分数重新出现。
+    const { data: reimportData } = openProject(reimportProject, 'inst-A')
+    const reimport = reimportData.restore(postSwitch.folder)
     assert.equal(reimport.restored, true)
-    assert.deepEqual(participantsOf(rollback).sort(), ['P-001', 'P-002', 'P-003'])
-    assert.equal(rollback.read('participants').revision, markOf('participants').revision + 1)
-    assert.equal(rollback.read('observations').revision, markOf('observations').revision + 1)
-    const observationIds = (rollback.read('observations').value?.observations || []).map(row => row.recordId)
+    assert.deepEqual(participantsOf(reimportData).sort(), ['P-001', 'P-002', 'P-003'])
+    assert.equal(reimportData.read('participants').revision, markOf('participants').revision + 1)
+    assert.equal(reimportData.read('observations').revision, markOf('observations').revision + 1)
+    const observationIds = (reimportData.read('observations').value?.observations || []).map(row => row.recordId)
     assert.ok(observationIds.includes('obs-P003-T0'), '切换后观察必须可重放')
-    const scoreIds = (rollback.read('scores').value?.rows || []).map(row => row.participantId)
+    const scoreIds = (reimportData.read('scores').value?.rows || []).map(row => row.participantId)
     assert.ok(scoreIds.includes('P-003'), '切换后分数必须可重放')
     // restore 只追加/切换 current，不删除已提交代次：新增代次仍在目录里。
-    const finalGeneration = rollback.read('participants').generationId
-    assert.ok(existsSync(path.join(rollbackProject.dataRoot, 'generations', 'participants', finalGeneration)))
-    assert.match(readFileSync(path.join(rollbackProject.dataRoot, 'generations', 'participants', finalGeneration, 'data.json'), 'utf8'), /P-003/)
+    const finalGeneration = reimportData.read('participants').generationId
+    assert.ok(existsSync(path.join(reimportProject.dataRoot, 'generations', 'participants', finalGeneration)))
+    assert.match(readFileSync(path.join(reimportProject.dataRoot, 'generations', 'participants', finalGeneration, 'data.json'), 'utf8'), /P-003/)
   } finally {
     rmSync(project.root, { recursive: true, force: true })
     rmSync(backupRoot, { recursive: true, force: true })
     rmSync(postRoot, { recursive: true, force: true })
     rmSync(rollbackProject.root, { recursive: true, force: true })
+    rmSync(reimportProject.root, { recursive: true, force: true })
   }
 })
 
@@ -499,7 +502,7 @@ test('M09-E restorePreflight 对错误实例/版本/研究/缺失/篡改备份�
   }
 })
 
-test('M09-F 已知限制：同根就地 restore 不重置提交指针，读取仍返回更高代次', () => {
+test('FIX-07 同根已有已提交数据时 restore 在写入前明确拒绝', () => {
   const project = makeProject('rc-r09-inplace-')
   const backupRoot = mkdtempSync(path.join(os.tmpdir(), 'rc-r09-inplace-out-'))
   try {
@@ -516,19 +519,17 @@ test('M09-F 已知限制：同根就地 restore 不重置提交指针，读取�
     const pointerFile = path.join(project.dataRoot, 'transactions', 'study-pointer.json')
     const pointerBefore = readFileSync(pointerFile, 'utf8')
 
-    const result = data.restore(backup.folder)
-    assert.equal(result.restored, true)
-
-    // restore 写回了旧 current.json …
-    const current = readJson(path.join(project.dataRoot, 'generations', 'participants', 'current.json'))
-    assert.equal(current.revision, oldMarks[0].revision)
-    // … 但不更新 study-pointer；head() 取指针与 current 中较大的 revision。
-    assert.equal(readFileSync(pointerFile, 'utf8'), pointerBefore, 'restore 不修改提交指针')
-    assert.equal(data.read('participants').revision, newRevision, '读取仍以指针的更高代次为准')
-    assert.deepEqual(participantsOf(data).sort(), ['P-001', 'P-002', 'P-003'])
-    // 对账会把 current 补齐回指针代次，说明同根恢复不能靠 restore 完成回退。
-    assert.deepEqual(data.reconcile(), ['participants'])
+    const beforeReject = snapshot(data)
+    assert.throws(
+      () => data.restore(backup.folder),
+      error => error.code === 'unsupported_restore_target',
+      '同根已有已提交数据时必须在写入前拒绝，不能返回 restored:true',
+    )
+    assert.deepEqual(snapshot(data), beforeReject, '拒绝恢复不得改动目标数据根')
+    assert.equal(readFileSync(pointerFile, 'utf8'), pointerBefore, '拒绝恢复不修改提交指针')
     assert.equal(readJson(path.join(project.dataRoot, 'generations', 'participants', 'current.json')).revision, newRevision)
+    assert.equal(data.read('participants').revision, newRevision)
+    assert.deepEqual(participantsOf(data).sort(), ['P-001', 'P-002', 'P-003'])
 
     // 新增代次没有被删除或改写：数据在，只是"回退"没有生效。
     assert.ok(existsSync(path.join(project.dataRoot, 'generations', 'participants', newGenerationId)), 'restore 不应静默删除切换后新增的代次')

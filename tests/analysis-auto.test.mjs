@@ -80,4 +80,22 @@ test('autoRun：核心数据变化后自动去抖运行，并随数据更新补�
   assert.ok(second, '数据变化后应自动补跑新的运行')
   assert.equal(second.pendingChanges, false, '补跑完成后不再提示有更新')
   assert.equal(second.queued, false)
-})
+
+  // FIX-02：数据不变、只改人工排除，也必须自动补跑；同一排除不得无限重复。
+  // 自动运行可能正在写，排除写入遇到 busy 时有界重试，模拟用户稍后再点一次。
+  let excluded = null
+  const deadline = Date.now() + 20000
+  while (Date.now() < deadline) {
+    const stateBefore = await get('status', 'page-auto0001')
+    const attempt = await post('exclude', { op: 'add', id: 'P-002', reason: '合成排除', revision: stateBefore.json.data.exclusionsRevision, binding: token }, 'page-auto0001')
+    if (attempt.status === 200) { excluded = attempt; break }
+    if (attempt.status !== 409) break
+    await new Promise(resolve => setTimeout(resolve, 200))
+  }
+  assert.ok(excluded, '排除写入应在自动运行结束后成功')
+  const third = await waitFor(state => (state.runs || []).length >= 3)
+  assert.ok(third, '只改排除名单也应触发一次自动运行')
+  assert.notEqual(third.runs[0].runId, second.runs[0].runId)
+  await new Promise(resolve => setTimeout(resolve, 600))
+  const settled = await get('status', 'page-auto0001')
+  assert.equal((settled.json.data.runs || []).length, 3, '同一排除不应反复补跑')})

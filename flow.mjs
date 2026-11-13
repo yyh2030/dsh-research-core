@@ -21,7 +21,7 @@ import path from 'node:path'
 import { parseCsv } from './materials.mjs'
 
 export const FLOW_SCHEMA_VERSION = 1
-export const FLOW_VERSION = '4.1.0'
+export const FLOW_VERSION = '4.2.0'
 
 export const COLLECTION_STATES = ['not_due', 'missing', 'received', 'entered', 'complete', 'conflict']
 export const QUALITY_STATES = ['unchecked', 'valid', 'invalid', 'unscorable', 'unknown']
@@ -392,12 +392,16 @@ export function openFlow(options = {}) {
     return mutate('observations', observationsEmpty(), doc => {
       const rows = doc.observations.filter(row => row.participantKey === participantKey && row.visitId === visitId && row.taskId === taskId)
       if (!rows.some(row => row.observationId === observationId)) throw new FlowError('not_found', '没有这份作答')
+      // 裁决版本在文档级单调递增：撤销后重新裁决不会复用旧版本号，
+      // 已发布的旧分数才能被分析层识别为"待重算"而不是继续有效。
+      const version = Number(doc.adjudicationSeq || 0) + 1
+      doc.adjudicationSeq = version
       for (const row of rows) {
         if (row.observationId === observationId) {
-          row.adjudication = { chosen: true, reason: input.reason, at: nowIso() }
+          row.adjudication = { chosen: true, reason: input.reason, at: nowIso(), version }
           row.collectionState = 'complete'
         } else {
-          row.adjudication = { chosen: false, supersededBy: observationId, reason: input.reason, at: nowIso() }
+          row.adjudication = { chosen: false, supersededBy: observationId, reason: input.reason, at: nowIso(), version }
           row.collectionState = 'conflict'
         }
       }
@@ -410,6 +414,8 @@ export function openFlow(options = {}) {
     const { participantKey, visitId, taskId } = input
     return mutate('observations', observationsEmpty(), doc => {
       const rows = doc.observations.filter(row => row.participantKey === participantKey && row.visitId === visitId && row.taskId === taskId)
+      if (!rows.length) throw new FlowError('not_found', '这个槽位没有可撤销的裁决')
+      doc.adjudicationSeq = Number(doc.adjudicationSeq || 0) + 1
       for (const row of rows) {
         row.adjudication = null
         row.collectionState = rows.length > 1 ? 'conflict' : row.collectionState

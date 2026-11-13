@@ -960,6 +960,13 @@ export function openResearchData(options = {}) {
       throw new DataError('source_invalid', `恢复预检未通过：${preflight.problems.join('；')}`, { committed: false, retryable: false, details: preflight })
     }
     const document = preflight.document
+    // 同根就地恢复只写 current.json，不推进提交指针；有已提交数据时返回请求前就制止，
+    // 避免 restored:true 实际仍读到更高代次。需要回退请恢复到干净新目录再切换研究。
+    if (hasCommittedData()) {
+      throw new DataError('unsupported_restore_target', '目标数据根已有已提交数据；请恢复到干净新目录后再切换研究', {
+        committed: false, retryable: false, details: { folder: preflight.folder },
+      })
+    }
     // 先认领实例身份再写代次：恢复到全新数据根时，写数据会触发"有数据但无身份"的保护。
     const instanceRestored = ensureInstance({ create: true })
     const restored = []

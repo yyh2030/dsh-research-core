@@ -141,8 +141,11 @@ export function openAnalysis({ data, study, owner = 'analysis-run' }) {
       slotCounts.set(key, (slotCounts.get(key) || 0) + 1)
     }
     const effectiveBySlot = new Map()
+    const observationSlots = new Map()
     for (const row of observationsResult.observations) {
       const key = `${row.participantKey}|${row.visitId}|${row.taskId}`
+      if (!observationSlots.has(key)) observationSlots.set(key, [])
+      observationSlots.get(key).push(row)
       const current = effectiveBySlot.get(key)
       if (!current) { effectiveBySlot.set(key, row); continue }
       // 已有裁决时以 chosen 为准；否则保留第一条并把冲突数交给统计。
@@ -169,8 +172,22 @@ export function openAnalysis({ data, study, owner = 'analysis-run' }) {
           const key = `${id}|${asText(variable.scaleId)}|${asText(variable.waveId)}|${asText(variable.subscaleKey || 'total')}`
           const score = scoreByKey.get(key.trim())
           if (!score) value = ''
-          else if (score.numericValue === null || score.numericValue === undefined) { value = ''; missingReason[variable.name] = score.reason || score.status || '不可计分' }
-          else value = Number(score.numericValue)
+          else {
+            // 分数必须与当前 observation 裁决一致：撤销后不读旧值，改选后未重算也不读旧值。
+            let stale = null
+            if (score.taskId && score.visitId) {
+              const slotKey = `${score.participantKey || participant.participantKey}|${asText(score.visitId)}|${asText(score.taskId)}`
+              const slotRows = observationSlots.get(slotKey) || []
+              const chosen = slotRows.find(row => row.adjudication && row.adjudication.chosen) || (slotRows.length === 1 ? slotRows[0] : null)
+              if (!chosen) stale = 'adjudication_revoked'
+              else if (score.observationId && chosen.observationId !== score.observationId) stale = 'score_pending'
+              else if (score.adjudicationVersion !== null && score.adjudicationVersion !== undefined
+                && Number(chosen.adjudication && chosen.adjudication.version) !== Number(score.adjudicationVersion)) stale = 'score_pending'
+            }
+            if (stale) { value = ''; missingReason[variable.name] = stale }
+            else if (score.numericValue === null || score.numericValue === undefined) { value = ''; missingReason[variable.name] = score.reason || score.status || '不可计分' }
+            else value = Number(score.numericValue)
+          }
         } else if (variable.type === 'task') {
           const key = `${participant.participantKey}|${variable.visitId}|${variable.taskId}`
           const slot = effectiveBySlot.get(key)

@@ -270,3 +270,43 @@ test('A05-A 排队后切到 B：回调仍只用排队时捕获的 A（cfg.output
   assert.equal(writes[0].value.requestedKey, requestedKey({ studyId: 'A', plan: planV1, datasetHash: 'dataset-a' }))
   scheduler.dispose()
 })
+
+test('FIX-02 只改排除名单也触发一次自动运行；同排除不重复', async () => {
+  const clock = new FakeClock()
+  const studyState = makeStudy('A', 'C:/fake/A/analysis')
+  let autoState = { requestedKey: 'stale' }
+  let exclusions = []
+  const latest = { plan: planV1, dataset: { hash: 'dataset-v1' }, exclusions: [] }
+  const calls = []
+  const scheduler = createScheduler({
+    config: { debounceMs: 100 },
+    current: () => studyState,
+    run: async (payload, state) => { calls.push({ payload, state }); return { ok: true } },
+    analysis: {
+      planFor: async () => planV1,
+      runs: async () => [{ runId: 'run-1' }],
+      latestMeta: async () => latest,
+      dataset: async () => ({ hash: 'dataset-v1' }),
+      instanceId: async () => 'instance-1',
+      exclusions: async () => exclusions,
+      blocked: () => false,
+    },
+    readAutoState: async () => ({ ...autoState }),
+    writeAutoState: async (cfg, value) => { autoState = { ...value } },
+    ...timers(clock),
+  })
+  await scheduler.tick()
+  assert.equal(scheduler.state().pending, false, '排除不变时不应排队')
+
+  exclusions = [{ id: 'P1', reason: 'test' }]
+  await scheduler.tick()
+  assert.equal(scheduler.state().pending, true, '只改排除应排队一次')
+  await clock.advance(100)
+  assert.equal(calls.length, 1, '排除变化应触发一次真实 run')
+
+  latest.exclusions = [{ id: 'P1', reason: 'test' }]
+  await scheduler.tick()
+  assert.equal(scheduler.state().pending, false)
+  assert.equal(calls.length, 1, '同一排除不得重复运行')
+  scheduler.dispose()
+})
