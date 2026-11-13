@@ -232,3 +232,12 @@ ode --check + 全套 168/168。
 - 测试：followup-01 6 例、FIX-02 scheduler 1 例、analysis-auto 真实排除补跑、FIX-07 迁移用例；
   全量 222 tests / 221 pass / 0 fail / 1 skipped；scale 28/28。
 - 限制：裁决后需手动重新计分；legacy scores 未标记 unverified；创建入口仅 study-ops（02 统一）。
+## 2026-11-13 · followup 02 共享研究选择器（B1—B5）
+
+- core 1.6.0：studyChoices（最近研究/作用域/缺失状态）、discoverStudy（三处约定配置）、
+  relocateStudy（同数据根才允许移动，复制/分叉冲突）、lastOpenedAt/openCount。
+- 四插件路由新增 studyChoices/studyDiscover/studyCreate/studyRelocate；demographic 创建改走核心。
+- 客户端：新增共享 client-study-picker.mjs 与 sync 脚本，四插件顶部统一“研究：名称 ▾”入口，
+  最近研究、选择文件夹、新建、高级路径、缺失重定位、页面/工作区/会话语义。
+- 测试：followup-02 B1/B2/B3/relocate/B4/B5 六例；B6 实际 GUI 验收待重启后进行。
+- 限制：未实现“在此研究工作区打开会话”；切换后不自动刷新他插件面板；整体移动身份事务未做。

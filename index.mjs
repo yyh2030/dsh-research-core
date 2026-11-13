@@ -22,7 +22,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync
 import os from 'node:os'
 import path from 'node:path'
 
-export const CORE_VERSION = '1.1.0'
+export const CORE_VERSION = '1.2.0'
 export const STORE_SCHEMA_VERSION = 1
 
 const SHARED = Symbol.for('dsh.research.core.v1')
@@ -41,6 +41,7 @@ export class BindingError extends Error {
 
 const conflict = (message, details) => new BindingError('binding_conflict', message, details)
 const invalid = (message, details) => new BindingError('invalid', message, details)
+const notFound = (message, details) => new BindingError('not_found', message, details)
 
 /* ------------------------------------------------------------------ *
  * 路径
@@ -585,6 +586,51 @@ function createCore(initial) {
     }
   }
 
+  /** 记录显式打开：lastSeenAt 保留兼容，lastOpenedAt/openCount 只用于"最近使用"。 */
+  function touchOpened(instanceId) {
+    if (!instanceId) return
+    const instances = loadInstances()
+    const entry = Object.values(instances.entries).find(row => row.instanceId === instanceId)
+    if (!entry) return
+    entry.lastOpenedAt = new Date().toISOString()
+    entry.openCount = Number(entry.openCount || 0) + 1
+    entry.lastSeenAt = entry.lastOpenedAt
+    saveInstances()
+  }
+
+  /**
+   * 重新定位：只有当新配置解析出的数据根仍属于同一实例时才按"移动"处理；
+   * 复制/分叉会得到不同 instanceId，必须作为新研究显式连接。
+   */
+  function relocateStudy(actor, options = {}) {
+    const instanceId = String(options.instanceId || '').trim()
+    if (!instanceId) throw invalid('重新定位需要实例引用')
+    const instances = loadInstances()
+    const entry = instances.entries[instanceId]
+    if (!entry) throw notFound('没有这个研究实例')
+    if (!options.studyPath) throw invalid('重新定位需要新的研究定义路径')
+    const next = describeStudy({ studyPath: path.resolve(actorScope(actor).cwd || process.cwd(), options.studyPath) })
+    let previous = null
+    try { if (entry.configPath) previous = describeStudy({ studyPath: entry.configPath }) } catch { previous = null }
+    const sameDataRoot = Boolean(previous && previous.dataRoot && next.dataRoot
+      && canonicalPath(previous.dataRoot) === canonicalPath(next.dataRoot))
+    // 数据根里的实例记录是更硬的证据：有记录且不是本实例，就是复制/分叉。
+    let markerId = null
+    try { markerId = JSON.parse(readFileSync(path.join(next.dataRoot, 'study-instance.json'), 'utf8')).instanceId || null } catch { markerId = null }
+    if (markerId && markerId !== instanceId) throw conflict('目标数据根属于另一实例（复制或分叉），不能按移动处理；请作为新研究连接')
+    if (!sameDataRoot && markerId !== instanceId) throw conflict('目标配置的数据根不是原实例；若确实移动，请让新配置指向原数据根')
+    // 视为移动：保留 instanceId，把注册项迁移到新的配置路径键上，再走统一 connect 持久化绑定。
+    const previousConfig = entry.configPath || null
+    delete instances.byKey[entry.instanceKey]
+    entry.instanceKey = next.instanceKey
+    entry.configPath = next.studyPath
+    entry.canonicalConfigPath = next.canonicalConfigPath
+    entry.canonicalRoot = next.canonicalRoot
+    instances.byKey[next.instanceKey] = entry
+    saveInstances()
+    const view = connect(actor, { studyPath: options.studyPath, source: 'relocate' })
+    return { ...view, relocated: true, previousConfig }
+  }
   function connect(actor, options = {}) {
     const scope = actorScope(actor)
     let studyPath = options.studyPath ? path.resolve(scope.cwd || process.cwd(), options.studyPath) : null
@@ -611,6 +657,7 @@ function createCore(initial) {
 
     const descriptor = describeStudy({ studyPath, cwd: scope.cwd || undefined })
     const withInstance = attachInstance(descriptor, { register: true })
+    touchOpened(withInstance.instanceId)
     const base = buildView(scope, withInstance, null)
     const record = persistRecord(scope, base, options.source || 'explicit')
     if (scope.kind === 'agent') persistWorkspace(scope, base, options.source || 'explicit')
@@ -783,6 +830,101 @@ function createCore(initial) {
     return { projectConfig, legacy: legacy ? legacy.descriptor.studyPath : null, workspace: workspace ? { id: workspace.id || null, path: workspace.path, binding: workspaceRecord } : null, studies: rows }
   }
 
+  /**
+   * 最近研究与当前作用域：只读、按 canonical 路径去重、只做有界存在性/配置检查。
+   * 不扫描整盘、不写注册表、不根据扫描时间推断权威版本。
+   */
+  function studyChoices(actor) {
+    const scope = actorScope(actor)
+    const resolved = resolve(actor)
+    const workspace = scope.cwd ? workspaceFor(scope.cwd) : null
+    const rows = new Map()
+    const keyOf = row => row.studyPath ? `path:${canonicalPath(row.studyPath) || row.studyPath}` : `inst:${row.instanceId || row.studyId || row.name || 'unknown'}`
+    const add = row => {
+      const key = keyOf(row)
+      const current = rows.get(key) || { studyPath: null, studyId: null, name: null, instanceId: null, dataRoot: null, lastSeenAt: null, sources: [], exists: false, valid: false, state: 'unknown', current: false }
+      const next = { ...current }
+      next.sources = [...new Set([...current.sources, ...(row.sources || [])])]
+      for (const field of ['studyPath', 'studyId', 'name', 'instanceId', 'dataRoot', 'lastSeenAt']) if (!next[field] && row[field]) next[field] = row[field]
+      rows.set(key, next)
+    }
+    const legacy = legacyDescriptor()
+    if (legacy) add({ studyPath: legacy.descriptor.studyPath, studyId: legacy.descriptor.studyId, name: legacy.descriptor.name, dataRoot: legacy.descriptor.dataRoot, sources: ['legacy'] })
+    if (scope.cwd) {
+      const projectConfig = projectConfigFor(scope.cwd)
+      if (projectConfig) add({ studyPath: projectConfig, sources: ['project'] })
+    }
+    if (workspace) {
+      const record = bindingRecord(`workspace:${pathKey(workspace.path)}`)
+      if (record && record.studyPath) add({ studyPath: record.studyPath, instanceId: record.instanceId, sources: ['workspace'] })
+    }
+    for (const row of listStudies()) add({ studyPath: row.studyPath, instanceId: row.instanceId, studyId: row.studyId, name: row.name, lastSeenAt: row.lastSeenAt, sources: ['recent'] })
+    if (resolved.studyPath) add({ studyPath: resolved.studyPath, instanceId: resolved.instanceId, studyId: resolved.studyId, name: resolved.name, sources: ['current'] })
+
+    for (const row of rows.values()) {
+      if (!row.studyPath) { row.state = 'empty'; continue }
+      row.exists = existsSync(row.studyPath)
+      try {
+        const info = describeStudy({ studyPath: row.studyPath, cwd: scope.cwd || undefined })
+        row.valid = true
+        row.studyId = row.studyId || info.studyId
+        row.name = row.name || info.name
+        row.dataRoot = row.dataRoot || info.dataRoot
+        row.state = 'ok'
+      } catch (error) {
+        row.valid = false
+        row.state = row.exists ? 'invalid' : 'missing'
+        row.error = error.message
+      }
+      row.current = Boolean(resolved.studyPath && canonicalPath(row.studyPath) === canonicalPath(resolved.studyPath))
+    }
+    const recent = [...rows.values()].sort((a, b) => String(b.lastSeenAt || '').localeCompare(String(a.lastSeenAt || '')))
+    return {
+      scope: {
+        kind: scope.kind,
+        cwd: scope.cwd || null,
+        page: scope.kind === 'page' ? scope.pageId : null,
+        session: scope.kind === 'agent' ? scope.sessionId : null,
+        workspace: workspace ? { id: workspace.id || null, path: workspace.path } : null,
+      },
+      binding: {
+        state: resolved.state || null,
+        source: resolved.source || null,
+        studyId: resolved.studyId || null,
+        studyPath: resolved.studyPath || null,
+        instanceId: resolved.instanceId || null,
+      },
+      recent,
+    }
+  }
+
+  /** 只检查约定位置（不递归）；多个配置原样返回，由用户选择，不按文件名/时间猜。 */
+  function discoverStudy(dir) {
+    const target = path.resolve(String(dir || ''))
+    if (!dir) throw invalid('需要研究目录')
+    let info
+    try { info = statSync(target) } catch { throw invalid('目录不存在：' + target) }
+    if (!info.isDirectory()) throw invalid('不是目录：' + target)
+    const places = ['study.json', path.join('.dsh', 'study.json'), path.join('_lab', 'study.json')]
+    const configs = []
+    for (const relativePath of places) {
+      const studyPath = path.join(target, relativePath)
+      if (!existsSync(studyPath)) continue
+      const row = { relativePath: relativePath.replaceAll('\\', '/'), studyPath, valid: false, problems: [] }
+      try {
+        const descriptor = describeStudy({ studyPath })
+        row.valid = true
+        row.studyId = descriptor.studyId
+        row.name = descriptor.name
+        row.dataRoot = descriptor.dataRoot
+      } catch (error) {
+        row.problems = [error.message]
+      }
+      configs.push(row)
+    }
+    return { dir: target, configs }
+  }
+
   function readCapabilities(actor) {
     const resolved = resolve(actor)
     const plugins = []
@@ -827,12 +969,15 @@ function createCore(initial) {
     legacyStudy,
     resolve,
     connect,
+    relocateStudy,
     disconnect,
     assertWrite,
     withBinding,
     readCapabilities,
     candidates,
     listStudies,
+    studyChoices,
+    discoverStudy,
     minimalDefinition,
     storeFile,
     // 01 文档里的领域方法名，保持与设计文档一一对应（实现见上）。
