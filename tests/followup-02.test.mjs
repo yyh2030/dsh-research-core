@@ -175,3 +175,40 @@ test('B3 重新定位：同一实例可更新位置，复制出来的新数据�
   const conflict = await post('studyRelocate', { instanceId, studyPath: copyPath })
   assert.equal(conflict.status, 409, JSON.stringify(conflict.json).slice(0, 400))
 })
+
+test('B6 四插件路由的最近研究视图同源（同一页面切换一次）', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'rc-b6-'))
+  const ws = path.join(root, 'ws'); mkdirSync(ws, { recursive: true })
+  const file = studyFile(path.join(root, 'a'), 'b6-study', '共享选择研究')
+  const host = makeHostAt(ws)
+  ;(await loadPlugin('D:/dsh-plugins/study-ops')).apply(host.ctx, {})
+  ;(await loadPlugin('D:/dsh-plugins/analysis-run')).apply(host.ctx, {})
+  ;(await loadPlugin('D:/dsh-plugins/scale-desk')).apply(host.ctx, {})
+  ;(await loadPlugin('D:/dsh-plugins/demographic-coder')).apply(host.ctx, {})
+  const page = 'page-b6-1'
+  const headers = { 'content-type': 'application/json', ...pageHeaders(page) }
+  const connect = await request(host.routes.get('/api/study-ops'), {
+    method: 'POST', path: '/api/study-ops', headers: { 'x-study-ops': '1', ...headers },
+    body: { action: 'studyConnect', payload: { studyPath: file } },
+  })
+  assert.equal(connect.status, 200, JSON.stringify(connect.json).slice(0, 400))
+  const endpoints = [
+    ['/api/study-ops', { 'x-study-ops': '1' }],
+    ['/api/analysis-run', { 'x-analysis-run': '1' }],
+    ['/api/scale-desk', { 'x-scale-desk': '1' }],
+    ['/api/demographic-coder', { 'x-demographic-coder': '1' }],
+  ]
+  for (const [route, extra] of endpoints) {
+    const handler = host.routes.get(route)
+    assert.ok(handler, `${route} 必须注册`)
+    const listed = await request(handler, {
+      method: 'POST', path: route,
+      headers: { ...extra, ...headers },
+      body: { action: 'studyChoices', payload: {} },
+    })
+    assert.equal(listed.status, 200, `${route}: ${JSON.stringify(listed.json).slice(0, 300)}`)
+    assert.equal(listed.json.data.binding.studyId, 'b6-study', `${route} 必须解析到同一研究`)
+    assert.equal(listed.json.data.scope.page, page)
+    assert.equal(listed.json.data.recent.some(row => row.current && row.studyPath === file), true)
+  }
+})
