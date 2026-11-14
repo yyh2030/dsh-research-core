@@ -487,11 +487,28 @@ function createCore(initial) {
   }
 
   /** 只读解析：不写盘。返回 state ∈ bound | candidate | empty | missing。 */
+  /** 页面没有 cwd 时，仍可按工作区 id 找到工作区绑定（标签页跟随工作区）。 */
+  function workspaceRecordById(id) {
+    const workspaceId = String(id || '').trim()
+    if (!workspaceId) return null
+    const bindings = loadBindings()
+    for (const [key, entry] of Object.entries(bindings.entries)) {
+      if (key.startsWith('workspace:') && entry && entry.workspaceId === workspaceId) return entry
+    }
+    return null
+  }
   function resolve(actor, options = {}) {
     const scope = actorScope(actor)
     const record = bindingRecord(scope.key)
     if (record) return resolveFromRecord(scope, record)
 
+    if (scope.kind === 'page' && scope.workspaceId) {
+      const workspaceRecord = workspaceRecordById(scope.workspaceId)
+      if (workspaceRecord) {
+        const view = resolveFromRecord(scope, { ...workspaceRecord, source: 'workspace' })
+        return { ...view, source: 'workspace' }
+      }
+    }
     if (scope.cwd && (scope.kind === 'agent' || scope.kind === 'probe' || scope.kind === 'page')) {
       const workspace = workspaceFor(scope.cwd)
       if (workspace) {
