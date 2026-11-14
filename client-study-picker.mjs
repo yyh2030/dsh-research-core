@@ -268,8 +268,8 @@ function createStudyPicker(options) {
     if (panel) { close(); return }
     panel = el('div', {
       style: {
-        position: 'fixed', top: '70px', right: '24px', width: '540px', maxWidth: 'calc(100vw - 48px)',
-        maxHeight: 'calc(100vh - 120px)', overflow: 'auto', zIndex: '2147483000', background: '#fbfaf6',
+        position: 'fixed', bottom: '108px', right: '24px', width: '540px', maxWidth: 'calc(100vw - 48px)',
+        maxHeight: 'calc(100vh - 200px)', overflow: 'auto', zIndex: '2147483000', background: '#fbfaf6',
         border: '1px solid #cdc7b7', borderRadius: '10px', padding: '14px', boxShadow: '0 18px 50px rgba(0,0,0,.22)',
         fontFamily: 'Cambria, "Noto Serif SC", serif', color: '#24221f', fontSize: '14px',
       },
@@ -280,10 +280,11 @@ function createStudyPicker(options) {
 
   function install() {
     if (root) return root
+    if (typeof window !== 'undefined' && window.__DSH_RESEARCH_PICKER_INSTANCE__) return window.__DSH_RESEARCH_PICKER_INSTANCE__
     if (!document.body || typeof document.body.appendChild !== 'function' || !document.createElement) return null
     root = el('button', {
       style: {
-        position: 'fixed', top: '18px', right: '26px', zIndex: '2147482000',
+        position: 'fixed', bottom: '64px', right: '24px', zIndex: '2147482000',
         height: '30px', padding: '0 12px', border: '1px solid #cdc7b7', borderRadius: '999px',
         background: '#fffefb', color: '#24221f', cursor: 'pointer', font: 'inherit', fontSize: '13px',
         boxShadow: '0 2px 10px rgba(0,0,0,.08)',
@@ -293,11 +294,22 @@ function createStudyPicker(options) {
     })
     root.addEventListener('click', open)
     document.body.append(root)
+    // 只在研究插件面板打开时显示；对话页不占用标题栏/正文空间。
+    const syncVisibility = () => {
+      let visible = false
+      try { visible = Boolean(document.querySelector('.so-pagehead,.sd-root,.dc-root,.ar-pagehead')) } catch { visible = false }
+      root.style.display = visible ? '' : 'none'
+      if (!visible && panel) close()
+    }
+    syncVisibility()
+    setInterval(syncVisibility, 800)
     refresh()
+    if (typeof window !== 'undefined') window.__DSH_RESEARCH_PICKER_INSTANCE__ = pickerApi
     return root
   }
 
-  return { install, open, close, refresh, get state() { return choices } }
+  const pickerApi = { install, open, close, refresh, get state() { return choices } }
+  return pickerApi
 }
 
 const DSH_RESEARCH_PICKER = { createStudyPicker }
