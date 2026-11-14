@@ -4,7 +4,7 @@
 
 给 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)(`dsh`)写的研究插件共享核心:研究身份与绑定、统一数据访问层、流程与 observation、结果渲染与图表。它是 Host 侧的库,没有独立界面。
 
-版本 1.3.0 · 需要 DSH ≥ 0.2.2-rc.1 · MIT 许可
+版本 1.6.0 · 需要 DSH ≥ 0.2.2-rc.1 · MIT 许可
 
 本仓库同时是这套研究插件的总览。
 

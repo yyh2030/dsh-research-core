@@ -32,7 +32,9 @@
     "results.mjs",
     "charts.mjs",
     "client-identity.mjs",
+    "client-study-picker.mjs",
     "scripts/sync-client-identity.mjs",
+    "scripts/sync-client-picker.mjs",
     "README.md"
   ],
   "scripts": {
