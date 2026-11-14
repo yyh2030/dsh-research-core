@@ -212,3 +212,18 @@ test('B6 四插件路由的最近研究视图同源（同一页面切换一次�
     assert.equal(listed.json.data.recent.some(row => row.current && row.studyPath === file), true)
   }
 })
+test('B7 页面无常驻 cwd 时按 workspaceId 跟随工作区研究绑定', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'rc-b7-'))
+  const ws = path.join(root, 'ws'); mkdirSync(ws, { recursive: true })
+  const file = studyFile(path.join(root, 'a'), 'workspace-follow', '跟随工作区研究')
+  const host = makeHostAt(ws)
+  const { hostBinding } = await import('../host.mjs')
+  const binding = hostBinding(host.ctx, { plugin: 'probe-b7', config: {} })
+  const agent = { kind: 'agent', sessionId: 's1', cwd: ws }
+  binding.connect(agent, { studyPath: file })
+  const page = { kind: 'page', pageId: 'page-b7-0001', workspaceId: 'w1' }
+  const choices = binding.studyChoices(page)
+  assert.equal(choices.binding.studyId, 'workspace-follow', '页面没有 cwd 时应按工作区 id 找到工作区绑定')
+  assert.equal(choices.binding.source, 'workspace')
+  assert.equal(choices.recent.some(row => row.current && row.studyPath === file), true)
+})
