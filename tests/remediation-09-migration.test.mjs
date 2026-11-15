@@ -2,7 +2,7 @@
  * 09 阶段：私有副本迁移与回退演练。
  *
  * 全部使用 mkdtemp 合成研究：不打开、不复制、不写入任何真实研究目录
- * （D:\yyh-lab、workspace 里的真实 study 或真实数据根）。
+ * （<data-root>、workspace 里的真实 study 或真实数据根）。
  *
  * 覆盖：
  *   a. 建研究并写入参与者/人口学/观察/分数，记录 revision、contentHash 与来源健康；
